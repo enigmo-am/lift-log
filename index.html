@@ -9,20 +9,21 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.svg">
 <link rel="stylesheet" href="styles.css">
+<script src="theme.js"></script>
 </head>
 <body>
 <header class="topbar">
   <h1>Lift Log</h1>
-  <div class="row"><button id="syncBadge" class="sync-badge" hidden></button><div id="streakBadge" class="streak-badge" title="Current streak"></div></div>
+  <div class="row"><button id="statusChip" class="status-chip" title="Backup status"></button><button id="modeBtn" class="icon-btn" title="Light / dark mode">🌙</button><div id="streakBadge" class="streak-badge" title="Current streak"></div></div>
 </header>
 
 <main id="view"></main>
 
 <nav class="tabs">
   <button data-tab="home" class="active"><span>⌂</span>Home</button>
-  <button data-tab="history"><span>☰</span>History</button>
-  <button data-tab="progress"><span>↗</span>Progress</button>
+  <button data-tab="activity"><span>↗</span>Activity</button>
   <button data-tab="stats"><span>▦</span>Stats</button>
+  <button data-tab="friends"><span>👥</span>Friends</button>
   <button data-tab="profile"><span>☺</span>Profile</button>
 </nav>
 
@@ -30,7 +31,7 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="config.js"></script>
-<script src="vendor/qrcode.js"></script>
+<script src="qrcode.js"></script>
 <script src="avatars.js"></script>
 <script src="muscles.js"></script>
 <script src="figure.js"></script>

@@ -4,11 +4,13 @@
 // Needs a Google OAuth Client ID in config.js. Without one, the app stays local-only.
 
 const Sync = (() => {
-  const SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+  // drive.appdata: your private data file.  drive.file: only files this app creates (your public friend card).
+  const SCOPE = "https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file";
   const FILE = "liftlog-data.json";
   const TOKEN_KEY = "liftlog.gtoken";
   let gis = null, timer = null, running = false, lastHash = null;
 
+  const apiKey = () => (typeof LIFTLOG_CONFIG !== "undefined" && LIFTLOG_CONFIG.googleApiKey) || "";
   const clientId = () => (typeof LIFTLOG_CONFIG !== "undefined" && LIFTLOG_CONFIG.googleClientId) || "";
   const available = () => !!clientId();
   const on = () => available() && S.sync && S.sync.provider === "drive";
@@ -67,8 +69,48 @@ const Sync = (() => {
     return (await r.json()).id;
   }
 
+  // Public friend card: a small stats-only JSON in your Drive, readable by anyone who has its link.
+  async function publishCard(t) {
+    if (typeof publicCard !== "function") return;
+    const body = JSON.stringify(publicCard());
+    try {
+      if (S.sync.pubId) {
+        await api(t, `https://www.googleapis.com/upload/drive/v3/files/${S.sync.pubId}?uploadType=media`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body });
+      } else {
+        const b = "liftlog" + Math.random().toString(36).slice(2);
+        const meta = JSON.stringify({ name: "Lift Log friend card.json", mimeType: "application/json",
+          description: "Your public Lift Log card (name, level, streak and summary stats only). Friends' apps read it to show your live stats. Delete it to stop sharing." });
+        const multipart = `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${b}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${b}--`;
+        const r = await api(t, "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", { method: "POST", headers: { "Content-Type": `multipart/related; boundary=${b}` }, body: multipart });
+        const id = (await r.json()).id;
+        await api(t, `https://www.googleapis.com/drive/v3/files/${id}/permissions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: "reader", type: "anyone" }) });
+        S.sync.pubId = id;
+      }
+      S.sync.pubError = "";
+    } catch (e) {
+      if (e.message.includes("404")) S.sync.pubId = null; // card file was deleted; recreate next time
+      S.sync.pubError = e.message;
+    }
+  }
+  // Read a friend's public card. Needs the API key from config.js (public files need no sign-in).
+  async function fetchCard(id) {
+    if (!apiKey() || !id) return null;
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media&key=${apiKey()}`);
+    if (!r.ok) throw new Error("Friend card " + r.status);
+    return r.json();
+  }
+  async function refreshFriends() {
+    let n = 0;
+    for (const f of S.friends || []) {
+      if (!f.p) continue;
+      try { const c = await fetchCard(f.p); if (c && c.id === f.id) { Object.assign(f, c, { p: f.p, key: f.key, added: f.added }); n++; } } catch (e) {}
+    }
+    if (n) localStorage.setItem(KEY, JSON.stringify(S));
+    return n;
+  }
+
   function payload(state) {
-    const { draft, timer, sync, ...rest } = state;
+    const { draft, timer, sync, lastBackup, ...rest } = state;
     return rest;
   }
   function hash(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0; return h; }
@@ -113,6 +155,7 @@ const Sync = (() => {
       const body = JSON.stringify(merged);
       const id = await upload(t, f && f.id, body);
       Object.assign(S, merged);
+      await publishCard(t);
       S.sync = { ...S.sync, fileId: id, lastSync: Date.now(), error: "" };
       lastHash = hash(JSON.stringify(payload(S)));
       localStorage.setItem(KEY, JSON.stringify(S));
@@ -137,5 +180,5 @@ const Sync = (() => {
   function onStatus(cb) { statusCb = cb; }
   function signOut() { const c = cached(); localStorage.removeItem(TOKEN_KEY); try { if (c && window.google) google.accounts.oauth2.revoke(c); } catch (e) {} }
 
-  return { available, on, run, schedule, merge, onStatus, signOut, hasToken: () => !!cached() };
+  return { available, on, run, schedule, merge, onStatus, signOut, fetchCard, refreshFriends, hasToken: () => !!cached() };
 })();

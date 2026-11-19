@@ -19,9 +19,10 @@ function blankProfile() {
     restCompound: 120, restIsolation: 75, playlist: "", memberId: Math.random().toString(36).slice(2, 8).toUpperCase() };
 }
 function blank() {
-  return { version: 3, profile: blankProfile(), weights: [], workouts: [], restDays: [], routines: JSON.parse(JSON.stringify(DEFAULT_ROUTINES)),
+  return { version: 4, profile: blankProfile(), weights: [], workouts: [], restDays: [], routines: JSON.parse(JSON.stringify(DEFAULT_ROUTINES)),
     draft: null, timer: null, uni: {}, showcase: [], friends: [], deleted: { w: [], r: [], wt: [] },
-    sync: { provider: "local", lastSync: null, fileId: null, error: "" }, updatedAt: 0 };
+    sync: { provider: "local", lastSync: null, fileId: null, error: "" }, appearance: { mode: "system", theme: "classic", style: "tint" },
+    lastBackup: null, updatedAt: 0 };
 }
 let S = load();
 function load() {
@@ -38,7 +39,8 @@ function migrate(s) {
   if (s.name && !out.profile.name) out.profile.name = s.name;
   out.deleted = Object.assign({ w: [], r: [], wt: [] }, s.deleted || {});
   out.sync = Object.assign(b.sync, s.sync || {});
-  out.version = 3;
+  out.appearance = Object.assign(b.appearance, s.appearance || {});
+  out.version = 4;
   return out;
 }
 function save() {
@@ -301,7 +303,7 @@ function myCardData() {
   const first = liftSessions().map((w) => w.date).sort()[0] || today();
   return { v: 1, n: S.profile.name || "Lifter", av: S.profile.avatarPreset || "", g: S.profile.goal, id: S.profile.memberId,
     lv: lv.lvl, st: st.cur, bs: st.best, wo: t.sessions, t: Math.round(t.vol / 100) / 10, ...bl,
-    b: showcaseBadges().map((x) => x.id), since: first.slice(0, 7), at: today() };
+    b: showcaseBadges().map((x) => x.id), since: first.slice(0, 7), at: today(), ...(Sync.on() && S.sync.pubId ? { p: S.sync.pubId } : {}) };
 }
 const b64u = { enc: (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
   dec: (s) => decodeURIComponent(escape(atob(s.replace(/-/g, "+").replace(/_/g, "/")))) };
@@ -374,6 +376,7 @@ function checkFriendLink() {
   let d; try { d = JSON.parse(b64u.dec(h.slice(3))); } catch (e) { toast("That friend link looks broken"); return; }
   if (d.id && d.id === S.profile.memberId) { toast("That's your own card 😄"); return; }
   const key = (d.id || d.n) + "";
+  if (d.p) Sync.fetchCard(d.p).then((live) => { if (live) Object.assign(d, live, { p: d.p }); }).catch(() => {});
   const exists = (S.friends || []).some((f) => f.key === key);
   openModal(`<h2>${exists ? "Update friend" : "Add friend?"}</h2>${dogtagHTML(d, false)}
     <p class="small muted">Friends are stored on this device only. Ask them to send a fresh link to update their stats.</p>
@@ -392,9 +395,10 @@ $$(".tabs button").forEach((b) => b.addEventListener("click", () => { tab = b.da
 function render() {
   $$(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   $("#streakBadge").innerHTML = `🔥 ${streaks().cur}`;
-  syncBadge();
+  statusChip();
+  $("#modeBtn").textContent = document.documentElement.dataset.mode === "dark" ? "☀️" : "🌙";
   hideTip();
-  ({ home: renderHome, history: renderHistory, progress: renderProgress, stats: renderStats, profile: renderProfile })[tab]();
+  ({ home: renderHome, activity: renderActivity, stats: renderStats, friends: renderFriends, profile: renderProfile })[tab]();
   renderTimer();
 }
 
@@ -477,7 +481,7 @@ function renderHome() {
   $("#routineSel").onchange = (e) => { homeRoutine = +e.target.value; if (homeRoutine >= 0) renderHome(); };
   $("#startBtn").onclick = () => { const i = +$("#routineSel").value; S.draft = newDraft(S.routines[i]); save(); render(); };
   $("#restBtn").onclick = () => { if (!S.restDays.includes(today())) S.restDays.push(today()); save(); toast("Rest day logged. Streak safe 🔥"); render(); };
-  const mf = $("#moreFlags"); if (mf) mf.onclick = () => { tab = "progress"; render(); };
+  const mf = $("#moreFlags"); if (mf) mf.onclick = () => { tab = "activity"; actView = "progress"; render(); };
 }
 function ring(v, target, label) {
   const r = 26, c = 2 * Math.PI * r, f = Math.min(1, v / target);
@@ -648,10 +652,11 @@ setInterval(() => {
 }, 250);
 
 // ---------- HISTORY ----------
+const subView = () => $("#sub") || $("#view");
 function renderHistory() {
   const items = [...S.workouts.map((w) => ({ type: "w", date: w.date, w })), ...S.restDays.map((d) => ({ type: "r", date: d }))]
     .sort((a, b) => b.date.localeCompare(a.date));
-  if (!items.length) { $("#view").innerHTML = `<div class="card">Nothing logged yet. Import your Arrow history in Profile, or log today's workout.</div>`; return; }
+  if (!items.length) { subView().innerHTML = `<div class="card">Nothing logged yet. Log today's workout, or import your history in Profile → Import data.</div>`; return; }
   let html = "", month = "";
   for (const it of items.slice(0, 400)) {
     const m = parseYmd(it.date).toLocaleDateString(undefined, { month: "long", year: "numeric" });
@@ -670,7 +675,7 @@ function renderHistory() {
         <div class="row" style="margin-top:8px"><button class="btn small" data-copy="${w.id}">Repeat this workout</button><button class="btn small danger" data-del="${w.id}">Delete</button></div>
       </div></div>`;
   }
-  $("#view").innerHTML = html;
+  subView().innerHTML = html;
   $$(".sess").forEach((c) => c.addEventListener("click", (e) => {
     const t = e.target;
     if (t.dataset.del) { if (confirm("Delete this session?")) { S.workouts = S.workouts.filter((w) => w.id !== t.dataset.del); S.deleted.w.push(t.dataset.del); invalidate(); save(); render(); } return; }
@@ -682,12 +687,20 @@ function renderHistory() {
   }));
 }
 
+// ---------- ACTIVITY (history + progress) ----------
+let actView = "history";
+function renderActivity() {
+  $("#view").innerHTML = `<div class="seg full" style="margin-bottom:12px"><button data-av="history" class="${actView === "history" ? "on" : ""}">History</button><button data-av="progress" class="${actView === "progress" ? "on" : ""}">Progress</button></div><div id="sub"></div>`;
+  $$("[data-av]").forEach((b) => (b.onclick = () => { actView = b.dataset.av; renderActivity(); }));
+  actView === "history" ? renderHistory() : renderProgress();
+}
+
 // ---------- PROGRESS ----------
 let progEx = null, progMetric = "top";
 function renderProgress() {
   const map = sessionsByExercise();
   const names = Object.keys(map).sort((a, b) => map[b].length - map[a].length);
-  if (!names.length) { $("#view").innerHTML = `<div class="card">No exercise history yet.</div>`; return; }
+  if (!names.length) { subView().innerHTML = `<div class="card">No exercise history yet.</div>`; return; }
   if (!progEx || !map[progEx]) progEx = names.find((n) => !isBW(n)) || names[0];
   const bw = isBW(progEx);
   const metrics = bw ? [["reps", "Best reps"], ["totalReps", "Total reps"]] : [["top", "Top weight"], ["e1rm", "Est. 1RM"], ["volume", "Volume"]];
@@ -700,7 +713,7 @@ function renderProgress() {
   const heavy = rec("top", (x) => x.top), strong = rec("e1rm", (x) => x.e1rm), most = rec("reps", (x) => x.reps), bigv = rec("vol", (x) => x.volume);
   const m = musclesFor(progEx), lvm = {}; m.s.forEach((k) => (lvm[k] = 2)); m.p.forEach((k) => (lvm[k] = 5));
 
-  $("#view").innerHTML = `
+  subView().innerHTML = `
   <div class="card">
     <select id="exSel">${names.map((n) => `<option ${n === progEx ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>
     <div class="row" style="margin:12px 0 4px"><div class="seg">${metrics.map(([k, l]) => `<button data-m="${k}" class="${k === progMetric ? "on" : ""}">${l}</button>`).join("")}</div></div>
@@ -929,23 +942,54 @@ function calendar(el) {
 }
 
 // ---------- PROFILE ----------
-const openSecs = new Set(["edit"]);
-function sec(id, title, extra, body) {
-  return `<details class="card acc" data-sec="${id}" ${openSecs.has(id) ? "open" : ""}><summary><span>${title}</span><span class="acc-x">${extra || ""}</span></summary><div class="acc-body">${body}</div></details>`;
+function sparkline(vals, w = 120, h = 30) {
+  if (vals.length < 2) return "";
+  const lo = Math.min(...vals), hi = Math.max(...vals), r = hi - lo || 1;
+  const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * w},${h - 3 - ((v - lo) / r) * (h - 6)}`).join(" ");
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts}"/></svg>`;
+}
+function backupAgo() {
+  const t = Math.max(S.lastBackup || 0, Sync.on() ? S.sync.lastSync || 0 : 0);
+  return t ? timeAgo(t) : "never";
 }
 function renderProfile() {
-  const p = S.profile, b = badgeStats(), earned = earnedBadges(), earnedIds = new Set(earned.map((x) => x.id));
-  const w = [...S.weights].sort((a, c) => a.date.localeCompare(c.date));
-  const show = showcaseBadges();
-  const cats = [...new Set(BADGES.map((x) => x.cat))];
-  const daysSinceBackup = S.lastBackup ? Math.floor((Date.now() - S.lastBackup) / 864e5) : null;
+  const p = S.profile, earned = earnedBadges(), show = showcaseBadges(), lv = levelInfo(), a = S.appearance;
+  const w = [...S.weights].sort((x, y) => x.date.localeCompare(y.date));
+  const tiles = [
+    ["edit", "✏️", "Edit profile", esc(p.name || "Add your name"), ""],
+    ["look", "🎨", "Appearance", `${THEMES[a.theme]?.name || "Classic"} · ${a.mode === "system" ? "auto" : a.mode}`, `<div class="tile-sw" style="background:${themePreview(a.theme, document.documentElement.dataset.mode)}"></div>`],
+    ["bw", "⚖️", "Bodyweight", w.length ? `${w.at(-1).kg} kg` : "Not logged yet", sparkline(w.slice(-12).map((x) => x.kg))],
+    ["badges", "🏅", "Badges", `${earned.length} of ${BADGES.length}`, `<div class="mini-bar"><div style="width:${(earned.length / BADGES.length) * 100}%"></div></div>`],
+    ["routines", "📋", "Routines", `${S.routines.length} routines`, `<div class="day-dots">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<i class="${S.routines.some((r) => r.day === d) ? "on" : ""}">${DAYS[d][0]}</i>`).join("")}</div>`],
+    ["data", Sync.on() ? "☁️" : "💾", "Data & backup", Sync.on() ? `Drive · synced ${S.sync.lastSync ? timeAgo(S.sync.lastSync) : "never"}` : `On device · backup ${backupAgo()}`, ""],
+    ["import", "📥", "Import data", "Arrow, Strong, Hevy, CSV", ""],
+    ["install", "📲", "Install app", isStandalone() ? "Installed ✓" : "Add to home screen", ""],
+  ];
+  $("#view").innerHTML = `
+    <div class="profile-top">${dogtagHTML(myCardData())}</div>
+    <div class="xp-row"><span class="lvl">Lv ${lv.lvl}</span><div class="xp"><div style="width:${Math.round(lv.pct * 100)}%"></div></div><span class="small muted">${lv.xp.toLocaleString()} XP</span></div>
+    <div class="card"><div class="row"><h2 style="margin:0">Showcase</h2><span class="spacer"></span><button class="btn small" id="editShow">Edit</button></div>
+      <div class="showcase">${[0, 1, 2].map((i) => show[i] ? `<div class="badge on big"><span>${show[i].icon}</span><small>${esc(show[i].name)}</small><em>${esc(show[i].desc)}</em></div>` : `<div class="badge empty"><span>＋</span><small>Empty</small></div>`).join("")}</div></div>
+    <div class="tile-grid">${tiles.map(([id, icon, title, sub, extra]) => `<button class="ptile" data-sheet="${id}">
+      <span class="ptile-ic">${icon}</span><b>${title}</b><span class="ptile-sub">${sub}</span>${extra}</button>`).join("")}</div>
+    <div class="row" style="justify-content:center;margin:6px 0 4px"><button class="btn ghost small danger" id="resetBtn">Delete all data on this device</button></div>
+    <p class="small muted" style="text-align:center">Lift Log · free and open source</p>`;
+  wireDogtag($("#view"));
+  $("#editShow").onclick = editShowcase;
+  const sheets = { edit: sheetEdit, look: sheetAppearance, bw: sheetBodyweight, badges: sheetBadges, routines: sheetRoutines, data: sheetData, import: sheetImport, install: sheetInstall };
+  $$("[data-sheet]").forEach((b) => (b.onclick = () => sheets[b.dataset.sheet]()));
+  $("#resetBtn").onclick = () => {
+    if (!confirm("Delete ALL workouts, rest days, routines and friends on this device? Download a backup first if unsure.")) return;
+    const keep = S.sync, look = S.appearance; S = blank(); S.sync = { ...keep, provider: "local" }; S.appearance = look; Sync.signOut(); invalidate(); save(); render();
+  };
+}
 
-  const editBody = `
+function sheetEdit() {
+  const p = S.profile;
+  openModal(`<h2>Edit profile</h2>
     <div class="avatar-edit">${avatarHTML(72)}
-      <div class="avatar-actions">
-        <label class="btn small">📷 Upload photo<input type="file" id="avatarFile" accept="image/*" hidden></label>
-        ${p.avatarImg || p.avatarPreset ? `<button class="btn small ghost" id="avatarClear">Use initial</button>` : ""}
-      </div></div>
+      <div class="avatar-actions"><label class="btn small">📷 Upload photo<input type="file" id="avatarFile" accept="image/*" hidden></label>
+        ${p.avatarImg || p.avatarPreset ? `<button class="btn small ghost" id="avatarClear">Use initial</button>` : ""}</div></div>
     <div class="avatar-grid">${Object.entries(AVATARS).map(([id, a]) => `<button class="av-pick ${p.avatarPreset === id && !p.avatarImg ? "on" : ""}" data-av="${id}" title="${a.name}">${avatarSVG(id)}</button>`).join("")}</div>
     <div class="form">
       <label class="full">Name<input type="text" id="pName" value="${esc(p.name)}" placeholder="Your name"></label>
@@ -956,134 +1000,165 @@ function renderProfile() {
       <label>Rest, small lifts (sec)<input type="number" id="pRestI" value="${esc(p.restIsolation)}" step="15"></label>
       <label class="full">Spotify playlist link<input type="text" id="pPlaylist" value="${esc(p.playlist)}" placeholder="https://open.spotify.com/playlist/…"></label>
     </div>
-    <button class="btn primary" id="saveProfile" style="margin-top:12px">Save profile</button>`;
+    <button class="btn primary block" id="saveProfile" style="margin-top:14px">Save</button>`, (sh) => {
+    const keepForm = () => Object.assign(p, { name: $("#pName", sh).value.trim(), height: $("#pHeight", sh).value, goal: $("#pGoal", sh).value,
+      weeklyTarget: +$("#pTarget", sh).value || 5, restCompound: +$("#pRestC", sh).value || 120, restIsolation: +$("#pRestI", sh).value || 75, playlist: $("#pPlaylist", sh).value.trim() });
+    $$(".av-pick", sh).forEach((bt) => (bt.onclick = () => { keepForm(); p.avatarPreset = bt.dataset.av; p.avatarImg = ""; save(); sheetEdit(); }));
+    const clr = $("#avatarClear", sh); if (clr) clr.onclick = () => { keepForm(); p.avatarPreset = ""; p.avatarImg = ""; save(); sheetEdit(); };
+    $("#avatarFile", sh).onchange = async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      try { keepForm(); p.avatarImg = await resizeImage(f, 192); p.avatarPreset = ""; save(); sheetEdit(); toast("Photo set"); } catch (err) { toast("Couldn't read that image"); }
+    };
+    $("#saveProfile", sh).onclick = () => {
+      keepForm(); save(); closeModal(); render();
+      toast(p.playlist && !spotifyEmbed(p.playlist) ? "Saved, but that doesn't look like a Spotify link" : "Profile saved");
+    };
+  });
+}
 
-  const bwBody = `
-    <div class="row"><input type="number" id="bwIn" step="0.1" placeholder="kg" style="max-width:110px"><input type="date" id="bwDate" value="${today()}" style="max-width:170px"><button class="btn" id="bwAdd">Add</button></div>
-    <div id="bwChart" style="margin-top:10px"></div>
-    ${w.length ? `<p class="small muted">Latest ${w.at(-1).kg} kg${w.length > 1 ? ` · ${w.at(-1).kg - w[0].kg >= 0 ? "+" : ""}${round1(w.at(-1).kg - w[0].kg)} kg since ${fmtShort(w[0].date)}` : ""}</p>` : `<p class="small muted">Weigh in once a week, at the same time of day, to see the trend.</p>`}`;
+function sheetAppearance() {
+  const a = S.appearance, mode = document.documentElement.dataset.mode;
+  openModal(`<h2>Appearance</h2>
+    <div class="lbl">Mode</div><div class="seg full">${[["system", "Auto"], ["light", "☀️ Light"], ["dark", "🌙 Dark"]].map(([k, l]) => `<button data-mode="${k}" class="${a.mode === k ? "on" : ""}">${l}</button>`).join("")}</div>
+    <div class="lbl">Colour theme</div>
+    <div class="theme-grid">${Object.entries(THEMES).map(([id, t]) => `<button class="theme-sw ${a.theme === id ? "on" : ""}" data-theme="${id}"><i style="background:${themePreview(id, mode)}"></i>${t.name}</button>`).join("")}</div>
+    <div class="lbl">Background style</div><div class="seg full">${[["solid", "Solid"], ["tint", "Tinted"], ["glow", "Glow"]].map(([k, l]) => `<button data-style="${k}" class="${a.style === k ? "on" : ""}">${l}</button>`).join("")}</div>
+    <p class="small muted" style="margin-top:12px">Solid keeps backgrounds neutral grey. Tinted adds a soft hint of the theme colour. Glow adds a gentle fade at the top of the screen. All themes use soft contrast for comfortable reading, and the dark modes avoid pure black.</p>`, (sh) => {
+    const set = (k, v) => { a[k] = v; applyTheme(a); save(); render(); sheetAppearance(); };
+    $$("[data-mode]", sh).forEach((b) => (b.onclick = () => set("mode", b.dataset.mode)));
+    $$("[data-theme]", sh).forEach((b) => (b.onclick = () => set("theme", b.dataset.theme)));
+    $$("[data-style]", sh).forEach((b) => (b.onclick = () => set("style", b.dataset.style)));
+  });
+}
 
-  const badgeBody = cats.map((c) => `<h3 class="cat">${c} <span class="muted small">${BADGES.filter((x) => x.cat === c && earnedIds.has(x.id)).length}/${BADGES.filter((x) => x.cat === c).length}</span></h3>
-    <div class="badge-grid">${BADGES.filter((x) => x.cat === c).map((x) => `<div class="badge ${earnedIds.has(x.id) ? "on" : ""}"><span>${x.icon}</span><small>${esc(x.name)}</small><em>${esc(x.desc)}</em></div>`).join("")}</div>`).join("");
+function sheetBodyweight() {
+  const w = [...S.weights].sort((x, y) => x.date.localeCompare(y.date));
+  openModal(`<h2>Bodyweight</h2>
+    <div class="row"><input type="number" id="bwIn" step="0.1" placeholder="kg" style="max-width:110px"><input type="date" id="bwDate" value="${today()}" style="max-width:170px"><button class="btn primary" id="bwAdd">Add</button></div>
+    <div id="bwChart" style="margin-top:12px"></div>
+    ${w.length ? `<p class="small muted">Latest ${w.at(-1).kg} kg${w.length > 1 ? ` · ${w.at(-1).kg - w[0].kg >= 0 ? "+" : ""}${round1(w.at(-1).kg - w[0].kg)} kg since ${fmtShort(w[0].date)}` : ""}</p>
+      <details><summary>All entries</summary><table class="data">${[...w].reverse().map((x) => `<tr><td>${fmtDate(x.date)}</td><td>${x.kg} kg</td><td style="text-align:right"><button class="ib x" data-del="${x.date}" aria-label="Delete">✕</button></td></tr>`).join("")}</table></details>`
+      : `<p class="small muted">Weigh in once a week, at the same time of day, to see the trend.</p>`}`, (sh) => {
+    if (w.length) lineChart($("#bwChart", sh), w.map((x) => ({ date: x.date, v: x.kg })), " kg", { h: 170 });
+    $("#bwAdd", sh).onclick = () => {
+      const kg = num($("#bwIn", sh).value), d = $("#bwDate", sh).value || today(); if (!kg) return;
+      S.weights = S.weights.filter((x) => x.date !== d); S.deleted.wt = S.deleted.wt.filter((x) => x !== d); S.weights.push({ date: d, kg }); save(); render(); sheetBodyweight();
+    };
+    $$("[data-del]", sh).forEach((b) => (b.onclick = () => { const d = b.dataset.del; S.weights = S.weights.filter((x) => x.date !== d); S.deleted.wt.push(d); save(); render(); sheetBodyweight(); }));
+  });
+}
 
-  const friends = S.friends || [];
-  const friendBody = `${friends.length ? friends.map((f, i) => `<button class="friend" data-fi="${i}">${avatarHTML(40, { n: f.n, av: f.av })}
-      <div><b>${esc(f.n)}</b><div class="small muted">Lv ${f.lv} · 🔥 ${f.st} · ${f.wo} workouts</div></div><span class="spacer"></span><span class="small muted">${fmtShort(f.at || f.added)}</span></button>`).join("")
-    : `<p class="small muted">No friends yet. Share your card, and when a friend opens your link or scans your QR code, they can add you. Ask them to send theirs back.</p>`}
-    <button class="btn" id="shareCard2" style="margin-top:8px">📤 Share my card</button>`;
+function sheetBadges() {
+  const ids = new Set(earnedBadges().map((x) => x.id)), cats = [...new Set(BADGES.map((x) => x.cat))];
+  openModal(`<h2>Badges <span class="muted small">${ids.size}/${BADGES.length}</span></h2>
+    ${cats.map((c) => `<h3 class="cat">${c} <span class="muted small">${BADGES.filter((x) => x.cat === c && ids.has(x.id)).length}/${BADGES.filter((x) => x.cat === c).length}</span></h3>
+      <div class="badge-grid">${BADGES.filter((x) => x.cat === c).map((x) => `<div class="badge ${ids.has(x.id) ? "on" : ""}"><span>${x.icon}</span><small>${esc(x.name)}</small><em>${esc(x.desc)}</em></div>`).join("")}</div>`).join("")}
+    <button class="btn block" id="toShow" style="margin-top:14px">Pin badges to my showcase</button>`, (sh) => { $("#toShow", sh).onclick = editShowcase; });
+}
 
-  const routineBody = `<div class="rlist">${S.routines.map((r, i) => `<button class="rrow" data-ri="${i}">
+function sheetRoutines() {
+  openModal(`<h2>Routines</h2><p class="small muted">The routine for today's weekday is suggested on Home.</p>
+    <div class="rlist">${S.routines.map((r, i) => `<button class="rrow" data-ri="${i}">
       <span class="dayp ${r.day >= 0 ? "" : "off"}">${r.day >= 0 ? DAYS[r.day] : "—"}</span>
       <div class="rmeta"><b>${esc(r.name)}</b><span class="small muted">${r.exercises.length} exercises · ${esc(r.exercises.slice(0, 3).join(", "))}${r.exercises.length > 3 ? "…" : ""}</span></div>
       <span class="chev">›</span></button>`).join("")}</div>
-    <button class="btn" id="addRoutine" style="margin-top:8px">+ New routine</button>`;
+    <button class="btn block" id="addRoutine" style="margin-top:10px">+ New routine</button>`, (sh) => {
+    $$(".rrow", sh).forEach((bt) => (bt.onclick = () => editRoutine(+bt.dataset.ri)));
+    $("#addRoutine", sh).onclick = () => editRoutine(-1);
+  });
+}
 
+function sheetData() {
   const driveReady = Sync.available(), driveOn = Sync.on(), ss = S.sync || {};
-  const syncBody = `
+  const fmtT = (t) => (t ? new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "never");
+  openModal(`<h2>Data & backup</h2>
+    <div class="status-list">
+      <div><span>💾 Saved on this device</span><b>${S.updatedAt ? fmtT(S.updatedAt) : "—"}</b></div>
+      <div><span>⬇️ Last backup file</span><b>${fmtT(S.lastBackup)}</b></div>
+      ${driveOn ? `<div><span>☁️ Last Google Drive sync</span><b class="${ss.error ? "warn" : ""}">${ss.error ? "⚠️ " + esc(ss.error) : fmtT(ss.lastSync)}</b></div>` : ""}
+    </div>
+    <div class="row wrap" style="margin:12px 0 4px"><button class="btn primary" id="exportBtn">⬇ Back up now</button>
+      ${driveOn ? `<button class="btn" id="syncNow">☁️ Sync now</button>` : ""}
+      <label class="btn">Restore backup<input type="file" id="restoreFile" accept=".json" hidden></label></div>
+    <p class="small muted">Every change is saved on your phone instantly. A backup file or Drive sync protects you if you lose the phone or clear the browser.</p>
+    <div class="lbl">Where to keep your data</div>
     <div class="opt-row">
       <button class="opt ${!driveOn ? "on" : ""}" data-store="local"><span>📱</span><b>This device</b><small>Works offline. Back up by hand.</small></button>
-      <button class="opt ${driveOn ? "on" : ""}" data-store="drive" ${driveReady ? "" : "disabled"}><span>☁️</span><b>Google Drive</b><small>${driveReady ? "Auto-saves to your own Drive. Still works offline." : "Not set up yet (see README)"}</small></button>
+      <button class="opt ${driveOn ? "on" : ""}" data-store="drive" ${driveReady ? "" : "disabled"}><span>☁️</span><b>Google Drive</b><small>${driveReady ? "Auto-saves to your own Drive and keeps working offline. Also lets friends see your live card." : "Not set up yet (see README)"}</small></button>
     </div>
-    ${driveOn ? `<div class="sync-status ${ss.error ? "err" : ""}">${ss.error ? `⚠️ ${esc(ss.error)}` : ss.lastSync ? `✓ Synced ${timeAgo(ss.lastSync)}` : "Not synced yet"}</div>
-      <div class="row wrap"><button class="btn primary" id="syncNow">Sync now</button></div>` : ""}
-    <p class="small muted" id="persistNote"></p>
-    <hr>
-    <h3>Backup</h3>
-    <p class="small ink2">${daysSinceBackup == null ? "You haven't downloaded a backup yet." : `Last backup ${daysSinceBackup === 0 ? "today" : daysSinceBackup + " days ago"}.`}</p>
-    <div class="row wrap"><button class="btn" id="exportBtn">⬇ Download backup</button><label class="btn">Restore backup<input type="file" id="restoreFile" accept=".json" hidden></label></div>
-    <hr>
-    <h3>Import from Arrow</h3>
-    <p class="small ink2">Pick the <code>…arrow-export.json</code> file. Importing twice won't create duplicates.</p>
-    <input type="file" id="arrowFile" accept=".json,application/json">`;
-
-  $("#view").innerHTML = `
-    <div class="profile-top">${dogtagHTML(myCardData())}
-      <div class="row" style="justify-content:center;margin-top:10px"><button class="btn" id="shareCard">📤 Share my card</button></div></div>
-    <div class="card"><div class="row"><h2 style="margin:0">Showcase</h2><span class="spacer"></span><button class="btn small" id="editShow">Edit</button></div>
-      <div class="showcase">${[0, 1, 2].map((i) => show[i] ? `<div class="badge on big"><span>${show[i].icon}</span><small>${esc(show[i].name)}</small><em>${esc(show[i].desc)}</em></div>` : `<div class="badge empty"><span>＋</span><small>Empty</small></div>`).join("")}</div>
-      <p class="small muted">${earned.length} of ${BADGES.length} badges unlocked. Pinned badges appear on the back of your card.</p></div>
-    ${sec("edit", "Edit profile", "", editBody)}
-    ${sec("bw", "Bodyweight", w.length ? w.at(-1).kg + " kg" : "", bwBody)}
-    ${sec("badges", "All badges", `${earned.length}/${BADGES.length}`, badgeBody)}
-    ${sec("friends", "Friends", friends.length || "", friendBody)}
-    ${sec("routines", "Routines", S.routines.length, routineBody)}
-    ${sec("data", "Data & sync", driveOn ? "☁️ Drive" : "📱 Device", syncBody)}
-    ${sec("danger", "Danger zone", "", `<button class="btn danger" id="resetBtn">Delete all data on this device</button>`)}
-    <p class="small muted" style="text-align:center">Lift Log · free and open source</p>`;
-
-  wireDogtag($("#view"));
-  $$("details.acc").forEach((d) => d.addEventListener("toggle", () => { d.open ? openSecs.add(d.dataset.sec) : openSecs.delete(d.dataset.sec); if (d.open && d.dataset.sec === "bw") drawBw(); }));
-  $("#shareCard").onclick = shareMyCard; $("#shareCard2").onclick = shareMyCard;
-  $("#editShow").onclick = editShowcase;
-
-  // profile + avatar
-  $("#saveProfile").onclick = () => {
-    Object.assign(p, { name: $("#pName").value.trim(), height: $("#pHeight").value, goal: $("#pGoal").value,
-      weeklyTarget: +$("#pTarget").value || 5, restCompound: +$("#pRestC").value || 120, restIsolation: +$("#pRestI").value || 75, playlist: $("#pPlaylist").value.trim() });
-    toast(p.playlist && !spotifyEmbed(p.playlist) ? "Saved, but that doesn't look like a Spotify link" : "Profile saved");
-    save(); render();
-  };
-  $$(".av-pick").forEach((bt) => (bt.onclick = () => { p.avatarPreset = bt.dataset.av; p.avatarImg = ""; save(); renderProfile(); }));
-  const clr = $("#avatarClear"); if (clr) clr.onclick = () => { p.avatarPreset = ""; p.avatarImg = ""; save(); renderProfile(); };
-  $("#avatarFile").onchange = async (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    try { p.avatarImg = await resizeImage(f, 192); p.avatarPreset = ""; save(); renderProfile(); toast("Photo set"); }
-    catch (err) { toast("Couldn't read that image"); }
-  };
-
-  // bodyweight
-  $("#bwAdd").onclick = () => {
-    const kg = num($("#bwIn").value), d = $("#bwDate").value || today(); if (!kg) return;
-    S.weights = S.weights.filter((x) => x.date !== d); S.weights.push({ date: d, kg }); save(); renderProfile();
-  };
-  function drawBw() { if (w.length && $("#bwChart")) lineChart($("#bwChart"), w.map((x) => ({ date: x.date, v: x.kg })), " kg", { h: 170 }); }
-  if (openSecs.has("bw")) drawBw();
-
-  // friends
-  $$(".friend").forEach((bt) => (bt.onclick = () => openFriend(+bt.dataset.fi)));
-
-  // routines
-  $$(".rrow").forEach((bt) => (bt.onclick = () => editRoutine(+bt.dataset.ri)));
-  $("#addRoutine").onclick = () => editRoutine(-1);
-
-  // data & sync
-  $$(".opt").forEach((bt) => (bt.onclick = async () => {
-    const want = bt.dataset.store;
-    if (want === "drive" && !Sync.on()) { S.sync.provider = "drive"; save(); await Sync.run(true); renderProfile(); }
-    if (want === "local" && Sync.on()) {
-      if (!confirm("Stop syncing to Google Drive? Your data stays on this device, and the Drive copy is kept.")) return;
-      S.sync.provider = "local"; Sync.signOut(); save(); renderProfile();
-    }
-  }));
-  const sn = $("#syncNow"); if (sn) sn.onclick = async () => { await Sync.run(true); renderProfile(); };
-  if (navigator.storage && navigator.storage.persisted) navigator.storage.persisted().then((ok) => {
-    const el = $("#persistNote"); if (el) el.textContent = ok ? "🔒 This browser has agreed not to clear Lift Log's storage on its own." : "Tip: add Lift Log to your home screen so your browser is less likely to clear its storage.";
+    <p class="small muted" id="persistNote"></p>`, (sh) => {
+    $("#exportBtn", sh).onclick = () => {
+      S.lastBackup = Date.now(); save();
+      const blob = new Blob([JSON.stringify({ ...S, timer: null, draft: null, exportedAt: new Date().toISOString() }, null, 1)], { type: "application/json" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `liftlog-backup-${today()}.json`; a.click();
+      toast("Backup downloaded"); render(); setTimeout(sheetData, 200);
+    };
+    const sn = $("#syncNow", sh); if (sn) sn.onclick = async () => { await Sync.run(true); render(); sheetData(); };
+    $("#restoreFile", sh).onchange = async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      try {
+        const d = JSON.parse(await f.text());
+        if (!d.version || !Array.isArray(d.workouts)) throw new Error("bad");
+        if (!confirm("Replace ALL data on this device with this backup?")) return;
+        const keepSync = S.sync; S = migrate(d); S.sync = keepSync; delete S.exportedAt; invalidate(); save(); applyTheme(S.appearance); closeModal(); toast("Backup restored"); render();
+      } catch (err) { toast("That isn't a Lift Log backup"); }
+    };
+    $$(".opt", sh).forEach((bt) => (bt.onclick = async () => {
+      const want = bt.dataset.store;
+      if (want === "drive" && !Sync.on()) { S.sync.provider = "drive"; save(); await Sync.run(true); render(); sheetData(); }
+      if (want === "local" && Sync.on()) {
+        if (!confirm("Stop syncing to Google Drive? Your data stays on this device, and the Drive copy is kept.")) return;
+        S.sync.provider = "local"; Sync.signOut(); save(); render(); sheetData();
+      }
+    }));
+    if (navigator.storage && navigator.storage.persisted) navigator.storage.persisted().then((ok) => {
+      const el = $("#persistNote", sh); if (el) el.textContent = ok ? "🔒 Your browser has agreed not to clear Lift Log's storage on its own." : "Tip: install the app (Profile → Install app) so your browser is less likely to clear its storage.";
+    });
   });
-  $("#exportBtn").onclick = () => {
-    S.lastBackup = Date.now(); save();
-    const blob = new Blob([JSON.stringify({ ...S, timer: null, draft: null, exportedAt: new Date().toISOString() }, null, 1)], { type: "application/json" });
-    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `liftlog-backup-${today()}.json`; a.click();
-    setTimeout(renderProfile, 300);
-  };
-  $("#restoreFile").onchange = async (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    try {
-      const d = JSON.parse(await f.text());
-      if (!d.version || !Array.isArray(d.workouts)) throw new Error("bad");
-      if (!confirm("Replace the data on this device with this backup?")) return;
-      const keepSync = S.sync; S = migrate(d); S.sync = keepSync; delete S.exportedAt; invalidate(); save(); toast("Backup restored"); render();
-    } catch (err) { toast("That isn't a Lift Log backup"); }
-  };
-  $("#arrowFile").onchange = async (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    try { const res = importArrow(JSON.parse(await f.text())); invalidate(); save(); toast(`Imported ${res.workouts} workouts and ${res.rest} rest days`); tab = "home"; render(); }
-    catch (err) { console.error(err); toast("That doesn't look like an Arrow export"); }
-  };
-  $("#resetBtn").onclick = () => {
-    if (!confirm("Delete ALL workouts, rest days, routines and friends on this device? Download a backup first if unsure.")) return;
-    const keep = S.sync; S = blank(); S.sync = { ...keep, provider: "local" }; Sync.signOut(); invalidate(); save(); render();
-  };
 }
+
+function sheetImport() {
+  openModal(`<h2>Import data</h2>
+    <p class="small ink2">Bring in your history from another app or a spreadsheet. The file type is detected automatically, and importing the same file twice won't create duplicates.</p>
+    <div class="imp-list">
+      <div><b>Arrow</b><span>JSON export (email their support)</span></div>
+      <div><b>Strong</b><span>Settings → Export data (CSV)</span></div>
+      <div><b>Hevy</b><span>Settings → Export data (CSV)</span></div>
+      <div><b>Spreadsheet</b><span>CSV with date, exercise, weight, reps</span></div>
+      <div><b>Lift Log</b><span>A backup file, merged into this device</span></div>
+    </div>
+    <label class="btn primary block" style="text-align:center;margin-top:12px">Choose file…<input type="file" id="impFile" accept=".json,.csv,text/csv,application/json" hidden></label>
+    <button class="btn ghost small" id="tplBtn" style="margin-top:8px">⬇ Download a CSV template</button>
+    <p class="small muted" id="impMsg"></p>`, (sh) => {
+    $("#impFile", sh).onchange = async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      try {
+        const res = importAny(await f.text(), f.name); invalidate(); save();
+        $("#impMsg", sh).textContent = `✓ ${res.source}: added ${res.workouts} workouts${res.rest ? ` and ${res.rest} rest days` : ""}.`;
+        toast(`Imported from ${res.source}`); render();
+      } catch (err) { console.error(err); $("#impMsg", sh).textContent = "⚠️ " + err.message; }
+    };
+    $("#tplBtn", sh).onclick = () => {
+      const csv = "date,workout,exercise,weight,reps,unit\n2026-11-19,Push A,Barbell Bench Press,50,8,kg\n2026-11-19,Push A,Barbell Bench Press,50,7,kg\n2026-11-19,Push A,Dumbbell Lateral Raise,6,12,kg\n";
+      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "liftlog-template.csv"; a.click();
+    };
+  });
+}
+
+let installEvt = null;
+window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installEvt = e; });
+const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+function sheetInstall() {
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  openModal(`<h2>Install Lift Log</h2>
+    ${isStandalone() ? `<p>✓ You're using the installed app.</p>` : installEvt ? `<button class="btn primary block" id="doInstall">📲 Install now</button>` :
+      ios ? `<ol class="steps"><li>Open this page in <b>Safari</b>.</li><li>Tap the <b>Share</b> button.</li><li>Choose <b>Add to Home Screen</b>.</li></ol>`
+          : `<ol class="steps"><li>Open the browser menu (<b>⋮</b>).</li><li>Tap <b>Install app</b> or <b>Add to Home screen</b>.</li></ol>`}
+    <p class="small ink2">Once installed, Lift Log gets its own icon, opens full screen with no address bar, works offline, and shows up in your app switcher like any other app.</p>`, (sh) => {
+    const b = $("#doInstall", sh); if (b) b.onclick = async () => { installEvt.prompt(); await installEvt.userChoice; installEvt = null; closeModal(); render(); };
+  });
+}
+
 function timeAgo(t) {
   const m = Math.round((Date.now() - t) / 60000);
   return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
@@ -1118,19 +1193,6 @@ function editShowcase() {
     $("#saveShow", sh).onclick = () => { S.showcase = pick; save(); closeModal(); render(); };
   });
 }
-function openFriend(i) {
-  const f = S.friends[i], me = myCardData();
-  const rows = [["Current streak", me.st, f.st], ["Best streak", me.bs, f.bs], ["Workouts", me.wo, f.wo], ["Lifted (t)", me.t, f.t],
-    ["Squat (kg)", round1(me.sq || 0), round1(f.sq || 0)], ["Bench (kg)", round1(me.bp || 0), round1(f.bp || 0)], ["Pull-ups", me.pu || 0, f.pu || 0]];
-  openModal(`<h2>${esc(f.n)}</h2>${dogtagHTML(f, false)}
-    <table class="data vs"><tr><th></th><th>You</th><th>${esc(f.n.split(" ")[0])}</th></tr>
-    ${rows.map(([l, a, b]) => `<tr><td>${l}</td><td class="${a > b ? "win" : ""}">${a}</td><td class="${b > a ? "win" : ""}">${b}</td></tr>`).join("")}</table>
-    <p class="small muted">Their stats are from ${fmtDate(f.at || f.added)}. Ask them to send a new link to update.</p>
-    <button class="btn danger" id="rmFriend">Remove friend</button>`, (sh) => {
-    wireDogtag(sh);
-    $("#rmFriend", sh).onclick = () => { if (confirm(`Remove ${f.n}?`)) { S.friends.splice(i, 1); save(); closeModal(); renderProfile(); } };
-  });
-}
 function editRoutine(i) {
   const r = i >= 0 ? JSON.parse(JSON.stringify(S.routines[i])) : { name: "New routine", day: -1, exercises: [] };
   const draw = (sh) => {
@@ -1157,11 +1219,12 @@ function editRoutine(i) {
     $("#rSave", sh).onclick = () => {
       r.name = $(".r-title", sh).value.trim() || "Routine";
       if (i >= 0) S.routines[i] = r; else S.routines.push(r);
-      save(); closeModal(); renderProfile(); toast("Routine saved");
+      save(); sheetRoutines(); toast("Routine saved");
     };
-    const del = $("#rDel", sh); if (del) del.onclick = () => { if (confirm(`Delete ${r.name}?`)) { S.routines.splice(i, 1); save(); closeModal(); renderProfile(); } };
+    const del = $("#rDel", sh); if (del) del.onclick = () => { if (confirm(`Delete ${r.name}?`)) { S.routines.splice(i, 1); save(); sheetRoutines(); } };
   });
 }
+
 
 // ---------- Arrow import ----------
 function importArrow(json) {
@@ -1208,6 +1271,99 @@ function importArrow(json) {
   return { workouts: nW, rest: nR };
 }
 
+// ---------- Generic import (Arrow, Strong, Hevy, CSV, Lift Log backup) ----------
+function parseCSV(text) {
+  text = text.replace(/^﻿/, "");
+  const first = text.split(/\r?\n/)[0];
+  const delim = (first.match(/;/g) || []).length > (first.match(/,/g) || []).length ? ";" : ",";
+  const rows = []; let row = [], cur = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+    else if (c === '"') q = true;
+    else if (c === delim) { row.push(cur); cur = ""; }
+    else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i++; row.push(cur); rows.push(row); row = []; cur = ""; }
+    else cur += c;
+  }
+  if (cur || row.length) { row.push(cur); rows.push(row); }
+  const head = rows.shift().map((h) => h.trim().toLowerCase());
+  return rows.filter((r) => r.some((x) => x.trim())).map((r) => Object.fromEntries(head.map((h, i) => [h, (r[i] ?? "").trim()])));
+}
+function parseAnyDate(s) {
+  if (!s) return null;
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2}))?/);
+  if (m) return { date: `${m[1]}-${m[2]}-${m[3]}`, time: m[4] ? `${pad(+m[4])}:${m[5]}` : undefined };
+  m = s.match(/^(\d{1,2})\s+(\w{3})\w*\s+(\d{4}),?\s*(\d{1,2}):(\d{2})?/); // Hevy: "28 Mar 2024, 10:15"
+  if (m) { const d = new Date(`${m[2]} ${m[1]}, ${m[3]}`); if (!isNaN(d)) return { date: ymd(d), time: m[4] ? `${pad(+m[4])}:${m[5] || "00"}` : undefined }; }
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); // 11/19/2026 (US) or 19/11/2026
+  if (m) { const a = +m[1], b = +m[2]; const [mo, da] = a > 12 ? [b, a] : [a, b]; return { date: `${m[3]}-${pad(mo)}-${pad(da)}` }; }
+  const d = new Date(s); return isNaN(d) ? null : { date: ymd(d), time: `${pad(d.getHours())}:${pad(d.getMinutes())}` };
+}
+function strHash(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); }
+function addImported(source, groups) {
+  // groups: Map key -> {date, name, start, dur, sets:[{ex,w,r}]}
+  const existing = new Set(S.workouts.map((w) => w.id)); let n = 0;
+  for (const [key, g] of groups) {
+    const id = "imp-" + strHash(source + key);
+    if (existing.has(id) || S.deleted.w.includes(id)) continue;
+    g.sets.forEach((x) => { if (isBW(x.ex) && !x.w) x.w = 0; if (UNILATERAL.test(x.ex)) x.u = 1; });
+    S.workouts.push({ id, date: g.date, name: g.name || "Workout", sets: g.sets, start: g.start, dur: g.dur, source });
+    n++;
+  }
+  return n;
+}
+function importAny(text, filename = "") {
+  const t = text.trim();
+  if (t.startsWith("{") || t.startsWith("[")) {
+    const j = JSON.parse(t);
+    const d = j.data || j;
+    if (Array.isArray(d.WorkoutInfo)) { const r = importArrow(j); return { source: "Arrow", ...r }; }
+    if (j.version && Array.isArray(j.workouts)) {
+      const before = S.workouts.length;
+      const merged = Sync.merge({ ...S }, { ...j, updatedAt: 0 }); // keep this device's profile/settings
+      Object.assign(S, merged);
+      return { source: "Lift Log backup", workouts: S.workouts.length - before, rest: 0 };
+    }
+    throw new Error("This JSON file isn't from a supported app.");
+  }
+  const rows = parseCSV(text); if (!rows.length) throw new Error("The file is empty.");
+  const cols = Object.keys(rows[0]);
+  const has = (...k) => k.every((x) => cols.includes(x));
+  const groups = new Map(); let source;
+  const push = (key, base, set) => { if (!groups.has(key)) groups.set(key, { ...base, sets: [] }); if (set.r > 0 || set.w > 0) groups.get(key).sets.push(set); };
+  const lbs = (v) => Math.round(v * 0.45359237 * 10) / 10;
+  if (has("exercise name", "set order", "date")) {               // Strong
+    source = "Strong";
+    for (const r of rows) {
+      const dt = parseAnyDate(r["date"]); if (!dt) continue;
+      const durTxt = r["duration"] || ""; const hm = durTxt.match(/(?:(\d+)h)?\s*(?:(\d+)m)?/);
+      const dur = hm && (hm[1] || hm[2]) ? (+hm[1] || 0) * 60 + (+hm[2] || 0) : undefined;
+      let w = num(r["weight"]) || 0; if ((r["weight unit"] || "").toLowerCase().startsWith("lb")) w = lbs(w);
+      push(r["date"] + r["workout name"], { date: dt.date, start: dt.time, name: r["workout name"], dur }, { ex: r["exercise name"], w, r: num(r["reps"]) || 0 });
+    }
+  } else if (has("exercise_title", "start_time")) {                // Hevy
+    source = "Hevy";
+    for (const r of rows) {
+      const dt = parseAnyDate(r["start_time"]); if (!dt) continue;
+      const en = parseAnyDate(r["end_time"]);
+      let dur; if (dt.time && en && en.time) { const [a1, a2] = dt.time.split(":").map(Number), [b1, b2] = en.time.split(":").map(Number); dur = (b1 * 60 + b2 - (a1 * 60 + a2) + 1440) % 1440 || undefined; }
+      if ((r["set_type"] || "").toLowerCase() === "warmup") continue;
+      const w = r["weight_kg"] !== undefined ? num(r["weight_kg"]) || 0 : lbs(num(r["weight_lbs"]) || 0);
+      push(r["start_time"] + r["title"], { date: dt.date, start: dt.time, name: r["title"], dur }, { ex: r["exercise_title"], w, r: num(r["reps"]) || 0 });
+    }
+  } else if (cols.includes("date") && cols.includes("exercise") && cols.includes("reps")) { // generic CSV
+    source = "CSV";
+    for (const r of rows) {
+      const dt = parseAnyDate(r["date"]); if (!dt) continue;
+      let w = num(r["weight"] ?? r["weight_kg"] ?? r["kg"]) || 0;
+      if ((r["unit"] || "").toLowerCase().startsWith("lb")) w = lbs(w);
+      const name = r["workout"] || r["workout name"] || "Workout";
+      push(dt.date + name, { date: dt.date, start: dt.time, name }, { ex: r["exercise"], w, r: num(r["reps"]) || 0 });
+    }
+  } else throw new Error("Couldn't recognise this CSV. Use the template, or columns named date, exercise, weight, reps.");
+  return { source, workouts: addImported(source, groups), rest: 0 };
+}
+
 // ---------- AI coach summary ----------
 function coachSummary() {
   const from = addDays(today(), -27), p = S.profile, st = streaks();
@@ -1228,22 +1384,94 @@ function coachSummary() {
   return lines.join("\n");
 }
 
-// ---------- sync badge ----------
+// ---------- FRIENDS ----------
+function publicCard() {
+  // the live card friends can read (only summary stats, never your full log)
+  const d = myCardData(), wk = weekStart(today());
+  const weekS = liftSessions().filter((w) => w.date >= wk);
+  const last = [...liftSessions()].sort((a, b) => a.date.localeCompare(b.date)).at(-1);
+  const ms = muscleSets(wk, addDays(wk, 6));
+  const lvl = (k) => { const r = ms[k] / WEEKLY_TARGET[k]; return ms[k] === 0 ? 0 : r < 0.25 ? 1 : r < 0.5 ? 2 : r < 0.75 ? 3 : r < 1 ? 4 : 5; };
+  return { ...d, wk: weekS.length, wks: wk, wv: Math.round(weekS.reduce((a, w) => a + w.sets.reduce((b, s) => b + setVol(s), 0), 0)),
+    last: last ? { d: last.date, n: last.name } : null, ms: Object.keys(MUSCLES).map(lvl).join(""),
+    prs: allPRs().slice(0, 3).map((x) => [x.ex, x.text, x.date]), upd: Date.now() };
+}
+const friendWeek = (f) => (f.wks === weekStart(today()) ? f.wk || 0 : 0);
+let friendsRefreshed = 0;
+function renderFriends() {
+  const me = { ...publicCard(), me: true };
+  const fr = S.friends || [];
+  const board = [me, ...fr].sort((a, b) => friendWeek(b) - friendWeek(a) || (b.st || 0) - (a.st || 0));
+  const live = Sync.on() && S.sync.pubId;
+  $("#view").innerHTML = `
+    <div class="card">
+      <div class="row"><div><h2 style="margin:0">Your friends</h2><div class="small muted">${fr.length ? `${fr.length} friend${fr.length > 1 ? "s" : ""}` : "Add friends by sharing cards"}</div></div><span class="spacer"></span>
+        <button class="btn small" id="showQR">QR code</button><button class="btn small primary" id="shareCard">📤 Share</button></div>
+      <p class="small ${live ? "ok-note" : "muted"}" style="margin:10px 0 0">${live ? "🟢 Your card is live. Friends see your stats update after each sync."
+        : Sync.available() ? "Turn on Google Drive in Profile → Data & backup so friends see your stats update live. Right now they get a snapshot."
+        : "Friends see a snapshot of your stats from when you shared. Live updates need Google Drive sync (see README)."}</p>
+    </div>
+    <div class="card"><div class="row"><h2 style="margin:0">This week</h2><span class="spacer"></span><span class="small muted">workouts · streak</span></div>
+      <div class="board">${board.map((f, i) => `<div class="brow ${f.me ? "me" : ""}"><span class="rank">${i + 1}</span>${avatarHTML(34, f.me ? S.profile : { n: f.n, av: f.av })}
+        <div class="bname"><b>${esc(f.me ? "You" : f.n)}</b><span class="small muted">${f.last ? `${esc(f.last.n)} · ${relDay(f.last.d)}` : "—"}</span></div>
+        <span class="bwk">${friendWeek(f)}</span><span class="bst">🔥${f.st || 0}</span></div>`).join("")}</div></div>
+    ${fr.length ? fr.map((f, i) => `<button class="card fcard" data-fi="${i}">
+      <div class="row">${avatarHTML(48, { n: f.n, av: f.av })}<div style="flex:1;min-width:0"><b>${esc(f.n)}</b>
+        <div class="small muted">Lv ${f.lv} · ${f.wo} workouts · ${f.t}t lifted</div>
+        <div class="small ${f.p ? "ok-note" : "muted"}">${f.p ? "🟢 live" : "📸 snapshot"} · updated ${f.upd ? timeAgo(f.upd) : fmtShort(f.at || f.added)}</div></div>
+        ${f.ms ? `<div class="fmini">${figureSVG(FIGURE_FRONT, (k) => +f.ms[Object.keys(MUSCLES).indexOf(k)] || 0, "")}</div>` : ""}</div></button>`).join("")
+      : `<div class="card empty-friends"><div style="font-size:40px">🤝</div><b>No friends yet</b><p class="small muted">Tap <b>Share</b> and send your link, or let a friend scan your QR code. When they open it, they can add you. Ask them to send theirs back so you can add them too.</p></div>`}`;
+  $("#shareCard").onclick = shareMyCard;
+  $("#showQR").onclick = () => openModal(`<h2>Scan to add me</h2><div class="big-qr">${qrSVG(shareURL()) || "QR code unavailable"}</div><p class="small muted" style="text-align:center">Open the phone camera and point it at the code.</p>`);
+  $$(".fcard").forEach((b) => (b.onclick = () => openFriend(+b.dataset.fi)));
+  if (Date.now() - friendsRefreshed > 5 * 60e3 && fr.some((f) => f.p)) {
+    friendsRefreshed = Date.now();
+    Sync.refreshFriends().then((n) => { if (n && tab === "friends") renderFriends(); });
+  }
+}
+function relDay(d) { const n = Math.round((parseYmd(today()) - parseYmd(d)) / 864e5); return n === 0 ? "today" : n === 1 ? "yesterday" : n < 7 ? `${n} days ago` : fmtShort(d); }
+function openFriend(i) {
+  const f = S.friends[i], me = myCardData();
+  const rows = [["Current streak", me.st, f.st], ["Best streak", me.bs, f.bs], ["Workouts", me.wo, f.wo], ["Lifted (t)", me.t, f.t],
+    ["Squat (kg)", round1(me.sq || 0), round1(f.sq || 0)], ["Bench (kg)", round1(me.bp || 0), round1(f.bp || 0)], ["Pull-ups", me.pu || 0, f.pu || 0]];
+  const lv = (k) => (f.ms ? +f.ms[Object.keys(MUSCLES).indexOf(k)] || 0 : 0);
+  openModal(`<h2>${esc(f.n)}</h2>${dogtagHTML(f, false)}
+    ${f.ms ? `<h3>Muscles this week</h3><div class="body-wrap small-fig">${figureSVG(FIGURE_FRONT, lv, "")}${figureSVG(FIGURE_BACK, lv, "")}</div>` : ""}
+    ${f.prs && f.prs.length ? `<h3>Recent PRs</h3>${f.prs.map(([ex, txt, d]) => `<div class="pr-row"><span>${esc(ex)}</span><span class="spacer"></span><b>${esc(txt)}</b><span class="small muted" style="width:52px;text-align:right">${fmtShort(d)}</span></div>`).join("")}` : ""}
+    <h3>You vs ${esc(f.n.split(" ")[0])}</h3>
+    <table class="data vs"><tr><th></th><th>You</th><th>${esc(f.n.split(" ")[0])}</th></tr>
+    ${rows.map(([l, a, b]) => `<tr><td>${l}</td><td class="${a > b ? "win" : ""}">${a}</td><td class="${b > a ? "win" : ""}">${b}</td></tr>`).join("")}</table>
+    <p class="small muted">${f.p ? "Live card: updates when they sync." : "Snapshot from " + fmtDate(f.at || f.added) + ". Ask them to send a new link to update."}</p>
+    <button class="btn danger" id="rmFriend">Remove friend</button>`, (sh) => {
+    wireDogtag(sh);
+    $("#rmFriend", sh).onclick = () => { if (confirm(`Remove ${f.n}?`)) { S.friends.splice(i, 1); save(); closeModal(); render(); } };
+  });
+}
+
+// ---------- status chip (backup / sync) ----------
 let syncState = "";
-function syncBadge(s) {
+function statusChip(s) {
   if (s) syncState = s;
-  const el = $("#syncBadge"); if (!el) return;
-  if (!Sync.on()) { el.hidden = true; return; }
-  el.hidden = false;
-  const st = syncState || (S.sync.error ? (S.sync.needsTap ? "tap" : "error") : "ok");
-  const map = { ok: ["☁️✓", "Synced"], pending: ["☁️…", "Saving…"], syncing: ["☁️↻", "Syncing…"], tap: ["☁️!", "Tap to sign in and sync"], error: ["☁️⚠", S.sync.error || "Sync error"] };
-  const [icon, title] = map[st] || map.ok;
-  el.textContent = icon; el.title = title; el.className = "sync-badge " + st;
+  const el = $("#statusChip"); if (!el) return;
+  let icon, label, cls;
+  if (Sync.on()) {
+    const st = syncState || (S.sync.error ? (S.sync.needsTap ? "tap" : "error") : "ok");
+    [icon, label, cls] = { ok: ["☁️", S.sync.lastSync ? "✓" : "", "ok"], pending: ["☁️", "…", "busy"], syncing: ["☁️", "↻", "busy"], tap: ["☁️", "!", "warn"], error: ["☁️", "⚠", "warn"] }[st] || ["☁️", "", "ok"];
+    el.title = st === "tap" ? "Tap to sign in to Google again" : st === "error" ? S.sync.error : `Synced ${S.sync.lastSync ? timeAgo(S.sync.lastSync) : "never"}`;
+  } else {
+    const days = S.lastBackup ? (Date.now() - S.lastBackup) / 864e5 : Infinity;
+    icon = "💾"; label = S.lastBackup ? (days < 1 ? "✓" : Math.floor(days) + "d") : "!"; cls = days <= 7 ? "ok" : "warn";
+    el.title = S.lastBackup ? `Last backup ${timeAgo(S.lastBackup)}` : "Not backed up yet";
+  }
+  el.innerHTML = `${icon}<span>${label}</span>`; el.className = "status-chip " + cls;
 }
 
 // ---------- boot ----------
-Sync.onStatus((s) => syncBadge(s));
-$("#syncBadge").onclick = () => Sync.run(true);
+Sync.onStatus((s) => { statusChip(s); if (s === "ok" && tab === "profile") renderProfile(); });
+$("#statusChip").onclick = () => { if (Sync.on() && (syncState === "tap" || S.sync.error)) Sync.run(true); else sheetData(); };
+$("#modeBtn").onclick = () => { S.appearance.mode = document.documentElement.dataset.mode === "dark" ? "light" : "dark"; applyTheme(S.appearance); save(); render(); };
+if (darkMQ) darkMQ.addEventListener("change", () => { if (S.appearance.mode === "system") { applyTheme(S.appearance); render(); } });
+applyTheme(S.appearance);
 render();
 checkFriendLink();
 window.addEventListener("hashchange", checkFriendLink);

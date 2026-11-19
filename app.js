@@ -329,7 +329,7 @@ function myCardData() {
 }
 const b64u = { enc: (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
   dec: (s) => decodeURIComponent(escape(atob(s.replace(/-/g, "+").replace(/_/g, "/")))) };
-function shareURL(d = myCardData()) { return `${location.origin}${location.pathname}#f=${b64u.enc(JSON.stringify(d))}`; }
+function shareURL(d = { ...myCardData(), fr: (S.friends || []).map((f) => f.id).filter(Boolean).slice(0, 30) }) { return `${location.origin}${location.pathname}#f=${b64u.enc(JSON.stringify(d))}`; }
 function qrSVG(text) {
   try { const q = qrcode(0, "L"); q.addData(text); q.make(); return q.createSvgTag({ cellSize: 3, margin: 0, scalable: true }); }
   catch (e) { return ""; }
@@ -406,7 +406,16 @@ function checkFriendLink() {
     wireDogtag(sh);
     $("#addFriend", sh).onclick = () => {
       S.friends = (S.friends || []).filter((f) => f.key !== key); S.friends.push({ ...d, key, added: today() });
-      save(); closeModal(); toast(`${d.n} added 🤝`); tab = "profile"; render();
+      save(); tab = "friends"; render();
+      const mutual = (d.fr || []).includes(S.profile.memberId);
+      if (mutual) { closeModal(); toast(`You and ${d.n} are now friends 🤝`); return; }
+      openModal(`<div style="text-align:center"><div style="font-size:44px">🤝</div><h2>${esc(d.n)} added!</h2>
+        <p class="small ink2">To show up on <b>${esc(d.n.split(" ")[0])}'s</b> phone too, send your card back. They just tap the link and press Add.</p>
+        <button class="btn primary block" id="sendBack">📤 Send my card to ${esc(d.n.split(" ")[0])}</button>
+        <button class="btn ghost small" id="later" style="margin-top:8px">Later</button></div>`, (sh2) => {
+        $("#sendBack", sh2).onclick = async () => { await shareMyCard(); closeModal(); };
+        $("#later", sh2).onclick = closeModal;
+      });
     };
   });
 }
@@ -1716,7 +1725,7 @@ function publicCard() {
   const lvl = (k) => { const r = ms[k] / WEEKLY_TARGET[k]; return ms[k] === 0 ? 0 : r < 0.25 ? 1 : r < 0.5 ? 2 : r < 0.75 ? 3 : r < 1 ? 4 : 5; };
   return { ...d, wk: weekS.length, wks: wk, wv: Math.round(weekS.reduce((a, w) => a + w.sets.reduce((b, s) => b + setVol(s), 0), 0)),
     last: last ? { d: last.date, n: last.name } : null, ms: Object.keys(MUSCLES).map(lvl).join(""),
-    prs: allPRs().slice(0, 3).map((x) => [x.ex, x.text, x.date]), upd: Date.now() };
+    prs: allPRs().slice(0, 3).map((x) => [x.ex, x.text, x.date]), fr: (S.friends || []).map((f) => f.id).filter(Boolean), upd: Date.now() };
 }
 const friendWeek = (f) => (f.wks === weekStart(today()) ? f.wk || 0 : 0);
 let friendsRefreshed = 0;
@@ -1740,12 +1749,13 @@ function renderFriends() {
     ${fr.length ? fr.map((f, i) => `<button class="card fcard" data-fi="${i}">
       <div class="row">${avatarHTML(48, { n: f.n, av: f.av })}<div style="flex:1;min-width:0"><b>${esc(f.n)}</b>
         <div class="small muted">Lv ${f.lv} · ${f.wo} workouts · ${f.t}t lifted</div>
-        <div class="small ${f.p ? "ok-note" : "muted"}">${f.p ? "🟢 live" : "📸 snapshot"} · updated ${f.upd ? timeAgo(f.upd) : fmtShort(f.at || f.added)}</div></div>
+        <div class="small ${f.p ? "ok-note" : "muted"}">${f.p ? "🟢 live" : "📸 snapshot"} · updated ${f.upd ? timeAgo(f.upd) : fmtShort(f.at || f.added)}</div>
+        <div class="small">${(f.fr || []).includes(S.profile.memberId) ? `<span class="ok-note">🤝 Friends both ways</span>` : `<span class="muted">⏳ Hasn't added you yet</span> · <span class="linkish" data-sendback="1">send your card</span>`}</div></div>
         ${f.ms ? `<div class="fmini">${figureSVG(FIGURE_FRONT, (k) => +f.ms[Object.keys(MUSCLES).indexOf(k)] || 0, "")}</div>` : ""}</div></button>`).join("")
       : `<div class="card empty-friends"><div style="font-size:40px">🤝</div><b>No friends yet</b><p class="small muted">Tap <b>Share</b> and send your link, or let a friend scan your QR code. When they open it, they can add you. Ask them to send theirs back so you can add them too.</p></div>`}`;
   $("#shareCard").onclick = shareMyCard;
   $("#showQR").onclick = () => openModal(`<h2>Scan to add me</h2><div class="big-qr">${qrSVG(shareURL()) || "QR code unavailable"}</div><p class="small muted" style="text-align:center">Open the phone camera and point it at the code.</p>`);
-  $$(".fcard").forEach((b) => (b.onclick = () => openFriend(+b.dataset.fi)));
+  $$(".fcard").forEach((b) => (b.onclick = (e) => { if (e.target.dataset.sendback) { e.stopPropagation(); shareMyCard(); return; } openFriend(+b.dataset.fi); }));
   if (Date.now() - friendsRefreshed > 5 * 60e3 && fr.some((f) => f.p)) {
     friendsRefreshed = Date.now();
     Sync.refreshFriends().then((n) => { if (n && tab === "friends") renderFriends(); });

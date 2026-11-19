@@ -1,5 +1,5 @@
 // Offline cache. Bump VERSION when you change files so phones pick up the update.
-const VERSION = "liftlog-v8";
+const VERSION = "liftlog-v9";
 const FILES = ["./", "index.html", "styles.css", "theme.js", "app.js", "config.js", "qrcode.js", "avatars.js", "muscles.js", "figure.js", "sync.js", "manifest.json", "icon.svg", "fonts/outfit-latin-600-normal.woff2", "fonts/outfit-latin-700-normal.woff2", "fonts/outfit-latin-800-normal.woff2"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener("activate", (e) => {

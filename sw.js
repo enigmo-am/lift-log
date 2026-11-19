@@ -1,6 +1,6 @@
 // Offline cache. Bump VERSION when you change files so phones pick up the update.
-const VERSION = "liftlog-v1";
-const FILES = ["./", "index.html", "styles.css", "app.js", "muscles.js", "manifest.json", "icon.svg"];
+const VERSION = "liftlog-v2";
+const FILES = ["./", "index.html", "styles.css", "app.js", "muscles.js", "figure.js", "manifest.json", "icon.svg"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener("activate", (e) => {
   e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== VERSION).map((k) => caches.delete(k)))));

@@ -3,13 +3,21 @@
 A free, offline workout logger that runs in your phone's browser. No account, no subscription, no premium features: everything is unlocked.
 
 **Features**
-- **Logger:** your weekly routines are preloaded. Each exercise shows what you did last time, so you know what to beat.
-- **Streak:** rest days count, just like in Arrow. You also get a GitHub-style calendar of your training days.
-- **Progress charts:** top weight, estimated 1RM or volume for every exercise, with personal bests marked.
-- **Muscle map:** a front and back body diagram shaded by how many sets each muscle got this week, compared with a weekly target.
-- **Coach notes:** flags when your reps collapse after a weight jump, when a lift has stalled for 5 weeks, and when you set a new best.
-- **Arrow import:** load the JSON export Arrow emails you, and your full history and streak come across.
-- **Backups:** download a backup file and restore it on any device.
+- **Home:** a greeting with your name, level and XP, your streak with a Mon–Sun week strip, a weekly goal ring, and today's plan with a muscle preview and your last numbers. It also shows recent PRs, coach notes, badges and your Spotify gym playlist.
+- **Logger:** tap ✓ after each set. Empty fields copy last session's numbers, and a rest timer starts automatically (it beeps and vibrates when time's up). There's a **Per side** toggle for one-side-at-a-time exercises like Bulgarian split squats, and a live workout clock.
+- **Muscle map:** a low-poly front and back figure shaded by sets vs weekly target, for this week, last week or 4 weeks.
+- **Charts:**
+  - muscle balance radar
+  - where your sets go
+  - weekly volume
+  - workouts per week
+  - favourite training days
+  - time of day you train
+  - streak calendar
+  - progress for each exercise, with PRs marked
+- **Records and coach notes:** best lifts for each exercise, plus flags for stalled lifts and reps collapsing after a weight jump.
+- **Profile:** name, avatar, goal, rest times, bodyweight log with a chart, and 21 badges.
+- **Arrow import** and **backup/restore**.
 
 ## Your data
 Everything is stored in your browser on your own device (`localStorage`). Nothing is sent anywhere. Each person who opens the app has their own separate log. Download a backup from **Settings** every so often. Clearing your browser data deletes your log.
@@ -40,6 +48,7 @@ After you change any file, update `VERSION` in `sw.js` (for example `liftlog-v2`
 |---|---|
 | `index.html` | Page shell and tab bar |
 | `app.js` | All app logic: logger, streak, charts, import and backup |
+| `figure.js` | The low-poly body figure used for muscle maps |
 | `muscles.js` | Which muscles each exercise works, weekly targets and body-map shapes |
 | `styles.css` | Styles, with automatic light and dark mode |
 | `sw.js`, `manifest.json`, `icon.svg` | Offline support and home-screen install |

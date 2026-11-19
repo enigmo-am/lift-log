@@ -102,34 +102,17 @@ function musclesFor(name) {
 // Exercises logged against bodyweight (Arrow stores bodyweight in the weight field).
 const BODYWEIGHT = /\b(pull ?ups?|chin ?ups?|push ?ups?|sit ?ups?|leg raises?|knee raises?|planks?|reverse crunch|body ?weight|dips?)\b/i;
 
-// Body map shapes: [muscleKey, svg element markup]
-const BODY_FRONT = [
-  ["frontDelts", '<ellipse cx="32" cy="38" rx="5" ry="6"/>'], ["frontDelts", '<ellipse cx="68" cy="38" rx="5" ry="6"/>'],
-  ["sideDelts", '<ellipse cx="25.5" cy="39" rx="4.5" ry="7"/>'], ["sideDelts", '<ellipse cx="74.5" cy="39" rx="4.5" ry="7"/>'],
-  ["chest", '<rect x="35" y="36" width="14" height="17" rx="5"/>'], ["chest", '<rect x="51" y="36" width="14" height="17" rx="5"/>'],
-  ["biceps", '<ellipse cx="24" cy="59" rx="4.5" ry="10"/>'], ["biceps", '<ellipse cx="76" cy="59" rx="4.5" ry="10"/>'],
-  ["forearms", '<ellipse cx="22" cy="84" rx="4" ry="12"/>'], ["forearms", '<ellipse cx="78" cy="84" rx="4" ry="12"/>'],
-  ["abs", '<rect x="42.5" y="56" width="15" height="36" rx="4"/>'],
-  ["obliques", '<rect x="35" y="58" width="6" height="30" rx="3"/>'], ["obliques", '<rect x="59" y="58" width="6" height="30" rx="3"/>'],
-  ["quads", '<ellipse cx="41" cy="132" rx="7.5" ry="23"/>'], ["quads", '<ellipse cx="59" cy="132" rx="7.5" ry="23"/>'],
-];
-const BODY_BACK = [
-  ["traps", '<polygon points="40,28 60,28 67,39 50,52 33,39"/>'],
-  ["rearDelts", '<ellipse cx="28.5" cy="39" rx="5" ry="6.5"/>'], ["rearDelts", '<ellipse cx="71.5" cy="39" rx="5" ry="6.5"/>'],
-  ["upperBack", '<rect x="40" y="46" width="20" height="15" rx="4"/>'],
-  ["lats", '<polygon points="34,45 39,47 41,62 43,82 35,72"/>'], ["lats", '<polygon points="66,45 61,47 59,62 57,82 65,72"/>'],
-  ["lowerBack", '<rect x="43" y="80" width="14" height="15" rx="4"/>'],
-  ["triceps", '<ellipse cx="24" cy="59" rx="4.5" ry="10"/>'], ["triceps", '<ellipse cx="76" cy="59" rx="4.5" ry="10"/>'],
-  ["forearms", '<ellipse cx="22" cy="84" rx="4" ry="12"/>'], ["forearms", '<ellipse cx="78" cy="84" rx="4" ry="12"/>'],
-  ["glutes", '<ellipse cx="42" cy="105" rx="8.5" ry="9"/>'], ["glutes", '<ellipse cx="58" cy="105" rx="8.5" ry="9"/>'],
-  ["hamstrings", '<ellipse cx="41" cy="135" rx="7" ry="19"/>'], ["hamstrings", '<ellipse cx="59" cy="135" rx="7" ry="19"/>'],
-  ["calves", '<ellipse cx="41" cy="173" rx="5.5" ry="14"/>'], ["calves", '<ellipse cx="59" cy="173" rx="5.5" ry="14"/>'],
-];
-const BODY_BASE = `
-  <circle class="base" cx="50" cy="15" r="10"/>
-  <rect class="base" x="45" y="23" width="10" height="8" rx="2"/>
-  <rect class="base" x="30" y="29" width="40" height="84" rx="12"/>
-  <rect class="base" x="18" y="32" width="11" height="70" rx="5.5"/>
-  <rect class="base" x="71" y="32" width="11" height="70" rx="5.5"/>
-  <rect class="base" x="32" y="106" width="16" height="104" rx="7"/>
-  <rect class="base" x="52" y="106" width="16" height="104" rx="7"/>`;
+// Exercises usually done one side at a time (reps are logged per side).
+const UNILATERAL = /bulgarian|split squat|lunge|single[- ]?(arm|leg)|one[- ]?arm|1[- ]?arm|kickback|concentration|step ?up|pistol/i;
+// Big multi-joint lifts get the longer rest timer.
+const COMPOUND = /squat|bench|press|row|pull ?ups?|pulldown|deadlift|lunge|dips?\b|chin|hip thrust|back extension/i;
+
+// Muscle groups for the balance radar and distribution charts.
+const GROUPS = {
+  Chest: ["chest"],
+  Back: ["lats", "upperBack", "traps", "lowerBack"],
+  Shoulders: ["frontDelts", "sideDelts", "rearDelts"],
+  Arms: ["biceps", "triceps", "forearms"],
+  Legs: ["quads", "hamstrings", "glutes", "calves"],
+  Core: ["abs", "obliques"],
+};

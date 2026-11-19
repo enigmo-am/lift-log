@@ -4,14 +4,6 @@
 const KEY = "liftlog.v1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-const DEFAULT_ROUTINES = [
-  { name: "Push A", day: 1, exercises: ["Incline Dumbbell Press", "Dumbbell Shoulder Press", "Chest Fly Machine", "Dumbbell Lateral Raise", "EZ Bar Skull Crusher", "Cable Tricep Pushdown"] },
-  { name: "Pull A", day: 2, exercises: ["Pull Ups", "Seated Row Machine", "Cable Lat Pulldown", "Cable Face Pull", "Incline Dumbbell Curl", "Dumbbell Hammer Curl"] },
-  { name: "Legs + Core A", day: 3, exercises: ["Barbell Squat", "Back Extension", "Inclined Leg Press Machine", "Seated Leg Extension Machine", "Calf Raise Machine", "Hanging Leg Raise", "Ab Crunch Machine"] },
-  { name: "Push B", day: 4, exercises: ["Barbell Bench Press", "Chest Fly Machine", "Dumbbell Lateral Raise", "Push Ups", "Dumbbell Lying Triceps Extension", "Dumbbell Kickback"] },
-  { name: "Pull B", day: 5, exercises: ["Pull Ups", "Dumbbell Row (Chest Supported)", "Rear Delt Fly", "Dumbbell Shrug", "Dumbbell Spider Curl", "Dumbbell Bicep Curl", "Dumbbell Wrist Curl"] },
-  { name: "Legs + Core B", day: 6, exercises: ["Dumbbell Bulgarian Split Squat", "Seated Leg Curl Machine", "Inclined Leg Press Machine", "Calf Raise Machine", "Planks", "Side Plank"] },
-];
 
 // ---------- state ----------
 function blankProfile() {
@@ -19,7 +11,7 @@ function blankProfile() {
     restCompound: 120, restIsolation: 75, playlist: "", memberId: Math.random().toString(36).slice(2, 8).toUpperCase() };
 }
 function blank() {
-  return { version: 4, profile: blankProfile(), weights: [], workouts: [], restDays: [], routines: JSON.parse(JSON.stringify(DEFAULT_ROUTINES)),
+  return { version: 4, profile: blankProfile(), weights: [], workouts: [], restDays: [], routines: [], customEx: {},
     draft: null, timer: null, uni: {}, showcase: [], friends: [], deleted: { w: [], r: [], wt: [] },
     sync: { provider: "local", lastSync: null, fileId: null, error: "" }, appearance: { mode: "system", theme: "classic", style: "tint" },
     lastBackup: null, updatedAt: 0 };
@@ -40,6 +32,7 @@ function migrate(s) {
   out.deleted = Object.assign({ w: [], r: [], wt: [] }, s.deleted || {});
   out.sync = Object.assign(b.sync, s.sync || {});
   out.appearance = Object.assign(b.appearance, s.appearance || {});
+  if (s.onboarded == null) out.onboarded = !!((s.workouts && s.workouts.length) || (s.profile && s.profile.name));
   out.version = 4;
   return out;
 }
@@ -405,14 +398,17 @@ function render() {
 // ---------- HOME ----------
 function greeting() { const h = new Date().getHours(); return h < 5 ? "Late night" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"; }
 function routineForToday() { const d = new Date().getDay(); return S.routines.find((r) => r.day === d) || S.routines[0]; }
-let homeRoutine = null;
+let homeRoutine = null, homeWeek = 0; // homeWeek: 0 = this week, 1 = last week, ...
 
 function renderHome() {
   if (S.draft) return renderLogger();
   const st = streaks(), lv = levelInfo(), p = S.profile;
   const r = homeRoutine != null && S.routines[homeRoutine] ? S.routines[homeRoutine] : routineForToday();
-  const wk = weekStart(today());
+  const wk = weekStart(today()), vwk = addDays(wk, -7 * homeWeek);
   const weekSessions = liftSessions().filter((w) => w.date >= wk);
+  const viewSessions = liftSessions().filter((w) => w.date >= vwk && w.date <= addDays(vwk, 6));
+  const firstLog = [...activeDays()].sort()[0] || today();
+  const canBack = addDays(vwk, -1) >= weekStart(firstLog);
   const weekVol = weekSessions.reduce((a, w) => a + w.sets.reduce((b, s) => b + setVol(s), 0), 0);
   const target = +p.weeklyTarget || 5;
   const days = activeDays(), rest = new Set(S.restDays), lifted = new Set(S.workouts.map((w) => w.date));
@@ -436,14 +432,21 @@ function renderHome() {
 
   <div class="card">
     <div class="row"><div><div class="big">🔥 ${st.cur}</div><div class="small muted">day streak · best ${st.best}</div></div><span class="spacer"></span>
-      ${ring(weekSessions.length, target, "this week")}</div>
+      ${ring(viewSessions.length, target, homeWeek === 0 ? "this week" : "that week")}</div>
+    <div class="wk-nav"><button class="icon-btn" id="wkBack" ${canBack ? "" : "disabled"} aria-label="Previous week">‹</button>
+      <span>${homeWeek === 0 ? "This week" : homeWeek === 1 ? "Last week" : `${fmtShort(vwk)} – ${fmtShort(addDays(vwk, 6))}`}</span>
+      <button class="icon-btn" id="wkFwd" ${homeWeek === 0 ? "disabled" : ""} aria-label="Next week">›</button></div>
     <div class="weekstrip">${Array.from({ length: 7 }, (_, i) => {
-      const d = addDays(wk, i), cls = lifted.has(d) ? "done" : rest.has(d) ? "rest" : d === today() ? "today" : d < today() ? "miss" : "";
-      return `<div class="wd ${cls}"><span>${"MTWTFSS"[i]}</span><i>${lifted.has(d) ? "✓" : rest.has(d) ? "z" : ""}</i></div>`;
+      const d = addDays(vwk, i), cls = lifted.has(d) ? "done" : rest.has(d) ? "rest" : d === today() ? "today" : d < today() ? "miss" : "";
+      return `<div class="wd ${cls}" title="${fmtDate(d)}"><span>${"MTWTFSS"[i]}</span><i>${lifted.has(d) ? "✓" : rest.has(d) ? "z" : ""}</i><small>${+d.slice(8)}</small></div>`;
     }).join("")}</div>
   </div>`;
 
-  html += `<div class="card">
+  if (!S.routines.length) html += `<div class="card empty-plan"><div style="font-size:36px">📋</div><h2>Set up your routine</h2>
+    <p class="small muted">Plan your training days once, and each day's workout will be ready here with your last numbers.</p>
+    <div class="row" style="justify-content:center;flex-wrap:wrap"><button class="btn primary" id="newR">+ Create routine</button><button class="btn" id="tplR">📚 Use a template</button></div>
+    <div class="row" style="justify-content:center;margin-top:8px"><button class="btn ghost small" id="startBtn">Start an empty workout</button><button class="btn ghost small" id="restBtn" ${st.loggedToday ? "disabled" : ""}>Log rest day</button></div><select id="routineSel" hidden><option value="-1"></option></select></div>`;
+  else html += `<div class="card">
     <div class="row"><h2 style="margin:0">${st.loggedToday ? "Done for today ✓" : "Today's plan"}</h2><span class="spacer"></span>
       <select id="routineSel" class="compact">${S.routines.map((x, i) => `<option value="${i}" ${x === r ? "selected" : ""}>${esc(x.name)}</option>`).join("")}<option value="-1">Empty workout</option></select></div>
     <div class="plan">
@@ -480,7 +483,10 @@ function renderHome() {
   wireDogtag($("#view"));
   $("#routineSel").onchange = (e) => { homeRoutine = +e.target.value; if (homeRoutine >= 0) renderHome(); };
   $("#startBtn").onclick = () => { const i = +$("#routineSel").value; S.draft = newDraft(S.routines[i]); save(); render(); };
-  $("#restBtn").onclick = () => { if (!S.restDays.includes(today())) S.restDays.push(today()); save(); toast("Rest day logged. Streak safe 🔥"); render(); };
+  const nr = $("#newR"); if (nr) { nr.onclick = () => editRoutine(-1); $("#tplR").onclick = chooseTemplate; }
+  $("#wkBack").onclick = () => { homeWeek++; renderHome(); };
+  $("#wkFwd").onclick = () => { homeWeek = Math.max(0, homeWeek - 1); renderHome(); };
+  const rb = $("#restBtn"); if (rb) rb.onclick = () => { if (!S.restDays.includes(today())) S.restDays.push(today()); save(); toast("Rest day logged. Streak safe 🔥"); render(); };
   const mf = $("#moreFlags"); if (mf) mf.onclick = () => { tab = "activity"; actView = "progress"; render(); };
 }
 function ring(v, target, label) {
@@ -566,12 +572,13 @@ function renderLogger() {
   $("#addExBtn").onclick = () => {
     const n = $("#addExName").value.trim(); if (!n) return;
     D.exercises.push({ ex: n, uni: isUni(n), sets: [0, 1, 2].map(() => ({ w: "", r: "", done: false })) }); save(); renderLogger();
+    ensureTagged(n);
   };
   $("#discardBtn").onclick = () => { if (confirm("Discard this workout?")) { S.draft = null; S.timer = null; save(); render(); } };
   $("#finishBtn").onclick = finishWorkout;
 }
 function allExerciseNames() {
-  const s = new Set(Object.keys(EXERCISE_MUSCLES));
+  const s = new Set([...Object.keys(EXERCISE_MUSCLES), ...Object.keys(customMuscles())]);
   S.workouts.forEach((w) => (w.sets || []).forEach((x) => s.add(x.ex)));
   S.routines.forEach((r) => r.exercises.forEach((x) => s.add(x)));
   return [...s].sort();
@@ -738,10 +745,11 @@ function renderProgress() {
       ${bw ? "" : `<div class="pl"><span>Biggest session</span><b>${fmtKg(bigv.volume)}</b></div>`}
       <div class="pl"><span>Sessions</span><b>${list.length}</b></div>
       <div class="pl"><span>Total sets</span><b>${list.reduce((a, x) => a + x.sets.length, 0)}</b></div>
-      <div class="small muted" style="margin-top:6px">Works: ${[...m.p.map((k) => MUSCLES[k]), ...m.s.map((k) => MUSCLES[k].toLowerCase())].join(", ") || "not mapped yet"}</div>
+      <div class="small muted" style="margin-top:6px">Works: ${[...m.p.map((k) => MUSCLES[k]), ...m.s.map((k) => MUSCLES[k].toLowerCase())].join(", ") || "not mapped yet"} · <a href="#" id="editMus">edit</a></div>
     </div></div></div>
   <div class="card"><h2>Coach notes</h2><div id="flags"></div></div>`;
   $("#exSel").onchange = (e) => { progEx = e.target.value; renderProgress(); };
+  $("#editMus").onclick = (e) => { e.preventDefault(); tagExercise(progEx, renderProgress); };
   $$(".seg button").forEach((b) => (b.onclick = () => { progMetric = b.dataset.m; renderProgress(); }));
   lineChart($("#chartBox"), list.map((x) => ({ date: x.date, v: x[progMetric], tip: x.sets.map((s) => fmtSet(progEx, s)).join(", ") })), unit, { prs: true });
   const f = coachFlags();
@@ -844,6 +852,37 @@ function hideTip() { const t = $("#tooltip"); if (t) t.hidden = true; }
 document.addEventListener("pointerdown", (e) => { if (!e.target.closest(".chart, .figure, .cal")) hideTip(); });
 
 // ---------- STATS ----------
+let selMuscle = null;
+function ringSVG(frac, size, stroke, label, cls = "") {
+  const r = (size - stroke) / 2, c = 2 * Math.PI * r, f = Math.max(0, Math.min(1, frac));
+  return `<svg class="mring ${cls}" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
+    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" class="rbg" stroke-width="${stroke}"/>
+    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" class="rfg ${frac >= 1 ? "full" : ""}" stroke-width="${stroke}" stroke-dasharray="${c * f} ${c}" transform="rotate(-90 ${size / 2} ${size / 2})"/>
+    <text x="50%" y="50%" dy=".35em">${label}</text></svg>`;
+}
+function lastTrained(k) {
+  const ws = [...liftSessions()].sort((a, b) => b.date.localeCompare(a.date));
+  for (const w of ws) if (w.sets.some((s) => { const m = musclesFor(s.ex); return m.p.includes(k) || m.s.includes(k); })) return w;
+  return null;
+}
+function muscleDetailHTML(k, ms, from, to, mult) {
+  const tg = WEEKLY_TARGET[k] * mult, frac = ms[k] / tg, lw = lastTrained(k);
+  const ago = lw ? Math.round((parseYmd(today()) - parseYmd(lw.date)) / 864e5) : null;
+  const contrib = {};
+  liftSessions().filter((w) => w.date >= from && w.date <= to).forEach((w) => w.sets.forEach((s) => {
+    const m = musclesFor(s.ex); const v = m.p.includes(k) ? 1 : m.s.includes(k) ? 0.5 : 0; if (v) contrib[s.ex] = (contrib[s.ex] || 0) + v; }));
+  const top = Object.entries(contrib).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const status = ms[k] === 0 ? ["⚪", "Not trained yet"] : frac >= 1 ? ["🟢", "Target hit"] : frac >= 0.6 ? ["🟡", `${round1(tg - ms[k])} more sets to target`] : ["🟠", `${round1(tg - ms[k])} more sets to target`];
+  const recov = ago == null ? "" : ago <= 1 ? "💤 Recovering (trained in the last 48 h)" : ago <= 3 ? "✅ Recovered, ready to train" : `⏰ Last trained ${ago} days ago`;
+  return `<div class="mdetail">${ringSVG(frac, 92, 10, `${Math.round(Math.min(frac, 9.99) * 100)}%`, "big")}
+    <div class="mdetail-txt"><div class="mname">${MUSCLES[k]}</div>
+      <div><b>${round1(ms[k])}</b> <span class="muted">of ${tg} sets</span></div>
+      <div class="small">${status[0]} ${status[1]}</div>
+      <div class="small muted">${recov}</div></div></div>
+    ${top.length ? `<div class="contrib">${top.map(([ex, v]) => `<div><span>${esc(ex)}</span><div class="cbar"><i style="width:${(v / top[0][1]) * 100}%"></i></div><b>${round1(v)}</b></div>`).join("")}</div>`
+      : `<p class="small muted">No sets for this muscle in this period.</p>`}`;
+}
+
 let statPeriod = "week0";
 function renderStats() {
   const wk = weekStart(today());
@@ -864,20 +903,30 @@ function renderStats() {
   const durs = S.workouts.filter((w) => w.dur).slice(-20).map((w) => w.dur);
   const avgDur = durs.length ? Math.round(durs.reduce((a, b) => a + b, 0) / durs.length) : 0;
 
+  // week vs last week
+  const lw0 = weekStart(today());
+  const wkStats = (a) => { const ss = liftSessions().filter((w) => w.date >= a && w.date <= addDays(a, 6));
+    const d = ss.filter((w) => w.dur); return { n: ss.length, sets: ss.reduce((x, w) => x + w.sets.length, 0), vol: ss.reduce((x, w) => x + w.sets.reduce((y, q) => y + setVol(q), 0), 0), dur: d.length ? Math.round(d.reduce((x, w) => x + w.dur, 0) / d.length) : 0 }; };
+  const cw = wkStats(lw0), pw = wkStats(addDays(lw0, -7));
+  const delta = (a, b) => (b ? Math.round(((a - b) / b) * 100) : null);
+  const kpi = (label, val, a, b) => { const d = delta(a, b); return `<div class="kpi"><span class="klbl">${label}</span><b>${val}</b>${d == null ? `<span class="kd">–</span>` : `<span class="kd ${d >= 0 ? "up" : "down"}">${d >= 0 ? "▲" : "▼"} ${Math.abs(d)}%</span>`}</div>`; };
+  if (!selMuscle) selMuscle = order.find((k) => ms[k] < tgt(k)) || order[0];
+
   $("#view").innerHTML = `
-  <div class="card">
-    <h2>Muscle map</h2>
-      <div class="seg">${Object.entries(periods).map(([k, v]) => `<button data-p="${k}" class="${k === statPeriod ? "on" : ""}">${v[0]}</button>`).join("")}</div>
-    <div class="body-wrap">${figureSVG(FIGURE_FRONT, lvl, "Front")}${figureSVG(FIGURE_BACK, lvl, "Back")}</div>
-    <div class="legend"><span>Sets vs target:</span><span><i class="sw l0"></i>none</span><span><i class="sw l2"></i>&lt;50%</span>
-      <span><i class="sw l3"></i>50–75%</span><span><i class="sw l4"></i>75–99%</span><span><i class="sw l5"></i>hit target</span></div>
-    <p class="small muted">Tap a muscle for details. Main muscle worked = 1 set, helper muscle = ½ set.</p>
+  <div class="card"><div class="row"><h2 style="margin:0">This week</h2><span class="spacer"></span><span class="small muted">vs last week</span></div>
+    <div class="kpis">${kpi("Workouts", cw.n, cw.n, pw.n)}${kpi("Sets", cw.sets, cw.sets, pw.sets)}${kpi("Volume", fmtKg(cw.vol), cw.vol, pw.vol)}${kpi("Avg time", cw.dur ? cw.dur + "m" : "–", cw.dur, pw.dur)}</div></div>
+  <div class="card" id="muscleCard">
+    <div class="row"><h2 style="margin:0">Muscles</h2><span class="spacer"></span>
+      <div class="seg">${Object.entries(periods).map(([k, v]) => `<button data-p="${k}" class="${k === statPeriod ? "on" : ""}">${v[0]}</button>`).join("")}</div></div>
+    <div class="explorer">
+      <div class="body-wrap">${figureSVG(FIGURE_FRONT, lvl, "Front")}${figureSVG(FIGURE_BACK, lvl, "Back")}</div>
+      <div id="mDetail">${muscleDetailHTML(selMuscle, ms, from, to, mult)}</div>
+    </div>
+    <div class="legend"><span><i class="sw l0"></i>none</span><span><i class="sw l2"></i>&lt;50%</span><span><i class="sw l3"></i>50–75%</span><span><i class="sw l4"></i>75–99%</span><span><i class="sw l5"></i>target hit</span></div>
+    <div class="ring-groups">${Object.entries(GROUPS).map(([g, ks]) => `<div class="rg"><div class="rg-h">${g}</div><div class="rg-row">${ks.map((k) =>
+      `<button class="rchip ${k === selMuscle ? "sel" : ""}" data-sel="${k}">${ringSVG(ms[k] / tgt(k), 52, 6, round1(ms[k]))}<span>${MUSCLES[k]}</span></button>`).join("")}</div></div>`).join("")}</div>
+    <p class="small muted">Ring = sets vs ${plabel === "4 weeks" ? "4-week" : "weekly"} target, number = sets done. Tap a ring or a muscle on the body for details. Main muscle = 1 set, helper = ½.</p>
   </div>
-  <div class="card"><h2>Sets per muscle · ${plabel.toLowerCase()}</h2>
-    <div class="bars">${order.map((k) => `<div class="b"><span>${MUSCLES[k]}</span>
-      <div class="track"><div class="fill" style="width:${(ms[k] / maxV) * 100}%"></div><div class="target" style="left:${(tgt(k) / maxV) * 100}%"></div></div>
-      <span class="v">${round1(ms[k])}/${tgt(k)}</span></div>`).join("")}</div>
-    <p class="small muted">Dark tick = target. Least-trained muscles are on top.</p></div>
   <div class="card"><h2>Muscle balance</h2><p class="small muted" style="margin-top:-4px">Last 4 weeks vs target. The dashed line is 100%, so a lopsided shape means some groups are getting more than others.</p><div id="radar"></div></div>
   <div class="card"><h2>Where your sets go</h2><p class="small muted" style="margin-top:-4px">Share of all sets, last 4 weeks</p>
     <div class="bars dist">${Object.keys(GROUPS).map((g) => [g, groupSum(g, m4) / totalSets4]).sort((a, b) => b[1] - a[1]).map(([g, f]) =>
@@ -902,10 +951,19 @@ function renderStats() {
 
   $$("[data-p]").forEach((b) => (b.onclick = () => { statPeriod = b.dataset.p; renderStats(); }));
   $("#copyCoach").onclick = async () => { const txt = coachSummary(); try { await navigator.clipboard.writeText(txt); toast("Summary copied. Paste it into your AI chat"); } catch (e) { openModal(`<h2>Your summary</h2><textarea style="min-height:300px">${esc(txt)}</textarea>`); } };
-  $$(".body-wrap .m").forEach((el) => {
-    const f = (ev) => { const k = el.dataset.m; showTip(ev.clientX, ev.clientY, `<b>${MUSCLES[k]}</b><br>${round1(ms[k])} of ${tgt(k)} sets`); };
-    el.addEventListener("pointerenter", f); el.addEventListener("pointerdown", f); el.addEventListener("pointerleave", hideTip);
+  const selectM = (k) => {
+    selMuscle = k;
+    $("#mDetail").innerHTML = muscleDetailHTML(k, ms, from, to, mult);
+    $$("#muscleCard .rchip").forEach((b) => b.classList.toggle("sel", b.dataset.sel === k));
+    $$("#muscleCard .m").forEach((el) => el.classList.toggle("sel", el.dataset.m === k));
+  };
+  $$("#muscleCard .m").forEach((el) => {
+    el.addEventListener("click", () => selectM(el.dataset.m));
+    el.addEventListener("pointerenter", (ev) => showTip(ev.clientX, ev.clientY, `<b>${MUSCLES[el.dataset.m]}</b><br>${round1(ms[el.dataset.m])} of ${tgt(el.dataset.m)} sets`));
+    el.addEventListener("pointerleave", hideTip);
   });
+  $$("#muscleCard .rchip").forEach((b) => (b.onclick = () => selectM(b.dataset.sel)));
+  selectM(selMuscle);
   radarChart($("#radar"), Object.keys(GROUPS).map((g) => { const v = groupSum(g, m4) / groupTgt(g); return { label: g, v, tip: `<b>${g}</b><br>${round1(groupSum(g, m4))} sets · ${Math.round(v * 100)}% of target` }; }));
 
   const weeks = [];
@@ -941,6 +999,82 @@ function calendar(el) {
   el.scrollLeft = el.scrollWidth;
 }
 
+// ---------- routine templates & exercise tagging ----------
+const TEMPLATES = {
+  ppl: { name: "Push / Pull / Legs", desc: "6 days · each muscle twice a week", routines: [
+    { name: "Push", day: 1, exercises: ["Barbell Bench Press", "Dumbbell Shoulder Press", "Incline Dumbbell Press", "Dumbbell Lateral Raise", "Cable Tricep Pushdown", "Overhead Dumbbell Triceps Extension"] },
+    { name: "Pull", day: 2, exercises: ["Pull Ups", "Barbell Row", "Cable Lat Pulldown", "Cable Face Pull", "Dumbbell Bicep Curl", "Dumbbell Hammer Curl"] },
+    { name: "Legs", day: 3, exercises: ["Barbell Squat", "Romanian Deadlift", "Leg Press", "Seated Leg Curl Machine", "Standing Calf Raise", "Hanging Leg Raise"] },
+    { name: "Push", day: 4, exercises: ["Overhead Press", "Incline Dumbbell Press", "Chest Fly Machine", "Cable Lateral Raise", "Dips"] },
+    { name: "Pull", day: 5, exercises: ["Chin Ups", "Seated Cable Rows", "Rear Delt Fly", "Barbell Shrug", "Incline Dumbbell Curl"] },
+    { name: "Legs", day: 6, exercises: ["Front Squat", "Hip Thrust", "Walking Lunge", "Lying Leg Curl", "Seated Calf Raise", "Cable Crunch"] } ] },
+  ul: { name: "Upper / Lower", desc: "4 days · balanced and simple", routines: [
+    { name: "Upper A", day: 1, exercises: ["Barbell Bench Press", "Barbell Row", "Overhead Press", "Cable Lat Pulldown", "Dumbbell Bicep Curl", "Cable Tricep Pushdown"] },
+    { name: "Lower A", day: 2, exercises: ["Barbell Squat", "Romanian Deadlift", "Leg Press", "Standing Calf Raise", "Planks"] },
+    { name: "Upper B", day: 4, exercises: ["Incline Dumbbell Press", "Pull Ups", "Dumbbell Shoulder Press", "Seated Cable Rows", "Dumbbell Hammer Curl", "Overhead Dumbbell Triceps Extension"] },
+    { name: "Lower B", day: 5, exercises: ["Deadlift", "Dumbbell Bulgarian Split Squat", "Seated Leg Curl Machine", "Seated Calf Raise", "Hanging Leg Raise"] } ] },
+  fb: { name: "Full body", desc: "3 days · great for beginners", routines: [
+    { name: "Full body A", day: 1, exercises: ["Barbell Squat", "Barbell Bench Press", "Barbell Row", "Dumbbell Lateral Raise", "Planks"] },
+    { name: "Full body B", day: 3, exercises: ["Deadlift", "Overhead Press", "Cable Lat Pulldown", "Dumbbell Bicep Curl", "Cable Tricep Pushdown"] },
+    { name: "Full body C", day: 5, exercises: ["Leg Press", "Incline Dumbbell Press", "Seated Cable Rows", "Dumbbell Lunge", "Hanging Leg Raise"] } ] },
+};
+function chooseTemplate() {
+  openModal(`<h2>Start from a template</h2><p class="small muted">You can rename, reorder and swap every exercise afterwards.</p>
+    <div class="rlist">${Object.entries(TEMPLATES).map(([id, t]) => `<button class="rrow" data-t="${id}"><div class="rmeta"><b>${t.name}</b><span class="small muted">${t.desc}</span></div><span class="chev">›</span></button>`).join("")}</div>
+    <button class="btn block" id="blankR" style="margin-top:10px">+ Build my own from scratch</button>`, (sh) => {
+    $$("[data-t]", sh).forEach((b) => (b.onclick = () => {
+      if (S.routines.length && !confirm("Add these routines next to your existing ones?")) return;
+      S.routines.push(...JSON.parse(JSON.stringify(TEMPLATES[b.dataset.t].routines))); save(); closeModal(); render(); toast("Routines added");
+    }));
+    $("#blankR", sh).onclick = () => editRoutine(-1);
+  });
+}
+// Tap a muscle once = main muscle, twice = helper, three times = off.
+function tagExercise(name, onDone) {
+  const cur = musclesFor(name);
+  const st = {}; cur.p.forEach((k) => (st[k] = 2)); cur.s.forEach((k) => (st[k] ||= 1));
+  const known = knownExercise(name);
+  const draw = (sh) => {
+    const lv = (k) => (st[k] === 2 ? 5 : st[k] === 1 ? 2 : 0);
+    $(".tag-figs", sh).innerHTML = figureSVG(FIGURE_FRONT, lv, "Front") + figureSVG(FIGURE_BACK, lv, "Back");
+    $(".tag-chips", sh).innerHTML = Object.keys(MUSCLES).map((k) => `<button class="mchip s${st[k] || 0}" data-k="${k}">${MUSCLES[k]}</button>`).join("");
+    $$("[data-m], [data-k]", sh).forEach((el) => el.addEventListener("click", (e) => {
+      const k = el.dataset.m || el.dataset.k; st[k] = ((st[k] || 0) + 2) % 3; draw(sh); // 0 -> 2 -> 1 -> 0
+    }));
+  };
+  openModal(`<h2>Which muscles does it work?</h2>
+    <p class="small ink2"><b>${esc(name)}</b>${known ? "" : " isn't in the built-in library yet."} Tap a muscle once for <b>main</b>, twice for <b>helper</b>, three times to clear. ${!known && (cur.p.length || cur.s.length) ? "I've pre-selected a guess from the name." : ""}</p>
+    <div class="body-wrap tag-figs"></div>
+    <div class="legend"><span><i class="sw l5"></i>main (1 set)</span><span><i class="sw l2"></i>helper (½ set)</span></div>
+    <div class="tag-chips"></div>
+    <div class="row" style="margin-top:14px"><button class="btn primary" id="tagSave" style="flex:1">Save</button>${customMuscles()[name] ? `<button class="btn" id="tagReset">Reset to default</button>` : ""}</div>`, (sh) => {
+    draw(sh);
+    $("#tagSave", sh).onclick = () => {
+      const p = Object.keys(st).filter((k) => st[k] === 2), s = Object.keys(st).filter((k) => st[k] === 1);
+      if (!p.length) { toast("Pick at least one main muscle"); return; }
+      S.customEx = { ...(S.customEx || {}), [name]: { p, s } }; invalidate(); save(); closeModal(); toast("Muscles saved"); if (onDone) onDone();
+    };
+    const rs = $("#tagReset", sh); if (rs) rs.onclick = () => { delete S.customEx[name]; invalidate(); save(); closeModal(); if (onDone) onDone(); };
+  });
+}
+// Ask about muscles only for brand-new names.
+function ensureTagged(name, onDone) { if (knownExercise(name)) return onDone && onDone(); tagExercise(name, onDone); }
+function sheetLibrary() {
+  const names = allExerciseNames();
+  openModal(`<h2>Exercise library</h2><p class="small muted">${Object.keys(EXERCISE_MUSCLES).length} built-in exercises, plus any you've added. Tap one to see or change the muscles it counts towards.</p>
+    <div class="row"><input type="text" id="libQ" placeholder="Search…"><button class="btn" id="libNew">+ New</button></div>
+    <div class="lib-list"></div>`, (sh) => {
+    const draw = () => {
+      const q = $("#libQ", sh).value.toLowerCase();
+      $(".lib-list", sh).innerHTML = names.filter((n) => n.toLowerCase().includes(q)).slice(0, 200).map((n) => { const m = musclesFor(n);
+        return `<button class="lib-row" data-n="${esc(n)}"><div><b>${esc(n)}</b><small>${m.p.map((k) => MUSCLES[k]).join(", ") || "⚠️ not tagged"}${customMuscles()[n] ? " · custom" : ""}</small></div><span class="chev">›</span></button>`; }).join("");
+      $$("[data-n]", sh).forEach((b) => (b.onclick = () => tagExercise(b.dataset.n, sheetLibrary)));
+    };
+    $("#libQ", sh).oninput = draw; draw();
+    $("#libNew", sh).onclick = () => { const n = ($("#libQ", sh).value || prompt("Exercise name:") || "").trim(); if (n) tagExercise(n.replace(/\b\w/g, (c) => c.toUpperCase()), sheetLibrary); };
+  });
+}
+
 // ---------- PROFILE ----------
 function sparkline(vals, w = 120, h = 30) {
   if (vals.length < 2) return "";
@@ -962,6 +1096,7 @@ function renderProfile() {
     ["badges", "🏅", "Badges", `${earned.length} of ${BADGES.length}`, `<div class="mini-bar"><div style="width:${(earned.length / BADGES.length) * 100}%"></div></div>`],
     ["routines", "📋", "Routines", `${S.routines.length} routines`, `<div class="day-dots">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<i class="${S.routines.some((r) => r.day === d) ? "on" : ""}">${DAYS[d][0]}</i>`).join("")}</div>`],
     ["data", Sync.on() ? "☁️" : "💾", "Data & backup", Sync.on() ? `Drive · synced ${S.sync.lastSync ? timeAgo(S.sync.lastSync) : "never"}` : `On device · backup ${backupAgo()}`, ""],
+    ["library", "🏋️", "Exercise library", `${Object.keys(EXERCISE_MUSCLES).length + Object.keys(customMuscles()).filter((n) => !EXERCISE_MUSCLES[n]).length} exercises`, ""],
     ["import", "📥", "Import data", "Arrow, Strong, Hevy, CSV", ""],
     ["install", "📲", "Install app", isStandalone() ? "Installed ✓" : "Add to home screen", ""],
   ];
@@ -976,11 +1111,11 @@ function renderProfile() {
     <p class="small muted" style="text-align:center">Lift Log · free and open source</p>`;
   wireDogtag($("#view"));
   $("#editShow").onclick = editShowcase;
-  const sheets = { edit: sheetEdit, look: sheetAppearance, bw: sheetBodyweight, badges: sheetBadges, routines: sheetRoutines, data: sheetData, import: sheetImport, install: sheetInstall };
+  const sheets = { edit: sheetEdit, look: sheetAppearance, bw: sheetBodyweight, badges: sheetBadges, routines: sheetRoutines, library: sheetLibrary, data: sheetData, import: sheetImport, install: sheetInstall };
   $$("[data-sheet]").forEach((b) => (b.onclick = () => sheets[b.dataset.sheet]()));
   $("#resetBtn").onclick = () => {
     if (!confirm("Delete ALL workouts, rest days, routines and friends on this device? Download a backup first if unsure.")) return;
-    const keep = S.sync, look = S.appearance; S = blank(); S.sync = { ...keep, provider: "local" }; S.appearance = look; Sync.signOut(); invalidate(); save(); render();
+    const keep = S.sync, look = S.appearance; S = blank(); S.sync = { ...keep, provider: "local" }; S.appearance = look; Sync.signOut(); invalidate(); save(); render(); obDraft = null; showOnboarding(0);
   };
 }
 
@@ -1062,8 +1197,10 @@ function sheetRoutines() {
       <span class="dayp ${r.day >= 0 ? "" : "off"}">${r.day >= 0 ? DAYS[r.day] : "—"}</span>
       <div class="rmeta"><b>${esc(r.name)}</b><span class="small muted">${r.exercises.length} exercises · ${esc(r.exercises.slice(0, 3).join(", "))}${r.exercises.length > 3 ? "…" : ""}</span></div>
       <span class="chev">›</span></button>`).join("")}</div>
-    <button class="btn block" id="addRoutine" style="margin-top:10px">+ New routine</button>`, (sh) => {
+    ${S.routines.length ? "" : `<p class="small muted">No routines yet.</p>`}
+    <div class="row" style="margin-top:10px"><button class="btn" id="addRoutine" style="flex:1">+ New routine</button><button class="btn" id="useTpl" style="flex:1">📚 Templates</button></div>`, (sh) => {
     $$(".rrow", sh).forEach((bt) => (bt.onclick = () => editRoutine(+bt.dataset.ri)));
+    $("#useTpl", sh).onclick = chooseTemplate;
     $("#addRoutine", sh).onclick = () => editRoutine(-1);
   });
 }
@@ -1193,8 +1330,8 @@ function editShowcase() {
     $("#saveShow", sh).onclick = () => { S.showcase = pick; save(); closeModal(); render(); };
   });
 }
-function editRoutine(i) {
-  const r = i >= 0 ? JSON.parse(JSON.stringify(S.routines[i])) : { name: "New routine", day: -1, exercises: [] };
+function editRoutine(i, resume) {
+  const r = resume || (i >= 0 ? JSON.parse(JSON.stringify(S.routines[i])) : { name: "New routine", day: -1, exercises: [] });
   const draw = (sh) => {
     $(".r-days", sh).innerHTML = [-1, 1, 2, 3, 4, 5, 6, 0].map((d) => `<button class="dayp ${r.day === d ? "on" : ""}" data-d="${d}">${d < 0 ? "Any" : DAYS[d]}</button>`).join("");
     $(".r-ex", sh).innerHTML = r.exercises.map((ex, j) => { const m = musclesFor(ex);
@@ -1213,13 +1350,14 @@ function editRoutine(i) {
     <datalist id="exList2">${allExerciseNames().map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
     <div class="row" style="margin-top:14px"><button class="btn primary" id="rSave" style="flex:1">Save routine</button>${i >= 0 ? `<button class="btn danger" id="rDel">Delete</button>` : ""}</div>`, (sh) => {
     draw(sh);
-    const add = () => { const v = $(".r-add", sh).value.trim(); if (!v) return; r.exercises.push(v); $(".r-add", sh).value = ""; draw(sh); };
+    const add = () => { const v = $(".r-add", sh).value.trim(); if (!v) return; r.exercises.push(v); $(".r-add", sh).value = ""; draw(sh);
+      if (!knownExercise(v)) { const snapshot = JSON.parse(JSON.stringify(r)); tagExercise(v, () => editRoutine(i, snapshot)); } };
     $("#rAddBtn", sh).onclick = add;
     $(".r-add", sh).addEventListener("keydown", (e) => { if (e.key === "Enter") add(); });
     $("#rSave", sh).onclick = () => {
       r.name = $(".r-title", sh).value.trim() || "Routine";
       if (i >= 0) S.routines[i] = r; else S.routines.push(r);
-      save(); sheetRoutines(); toast("Routine saved");
+      save(); render(); sheetRoutines(); toast("Routine saved");
     };
     const del = $("#rDel", sh); if (del) del.onclick = () => { if (confirm(`Delete ${r.name}?`)) { S.routines.splice(i, 1); save(); sheetRoutines(); } };
   });
@@ -1466,6 +1604,114 @@ function statusChip(s) {
   el.innerHTML = `${icon}<span>${label}</span>`; el.className = "status-chip " + cls;
 }
 
+// ---------- ONBOARDING ----------
+let obStep = 0, obDraft = null;
+function needsOnboarding() { return !S.onboarded; }
+function finishOnboarding() { S.onboarded = true; save(); const o = $("#onboard"); if (o) o.remove(); document.body.classList.remove("ob-open"); tab = "home"; render(); }
+function showOnboarding(step = 0) {
+  obStep = step; obDraft ||= { ...S.profile };
+  let o = $("#onboard");
+  if (!o) { o = document.createElement("div"); o.id = "onboard"; o.className = "onboard"; document.body.appendChild(o); document.body.classList.add("ob-open"); }
+  const steps = [obWelcome, obProfile, obLook, obGoal, obFriends];
+  o.innerHTML = `<div class="ob-inner">${steps[step]()}</div>`;
+  wireOb(o, step);
+}
+const obDots = (i) => `<div class="ob-dots">${[1, 2, 3, 4].map((n) => `<i class="${n === i ? "on" : n < i ? "done" : ""}"></i>`).join("")}</div>`;
+const obNav = (i, nextLabel = "Next") => `<div class="ob-nav">${i > 1 ? `<button class="btn ghost" data-ob="back">Back</button>` : `<span></span>`}
+  <button class="btn primary" data-ob="next">${nextLabel}</button></div>`;
+function obWelcome() {
+  const g = Sync.available();
+  return `<div class="ob-hero"><img src="icon.svg" alt="" class="ob-logo"><h1>Lift Log</h1><p class="muted">Your workouts, streaks and progress, free with no ads.</p></div>
+    <div class="ob-choices">
+      <button class="ob-choice" data-ob="google" ${g ? "" : "disabled"}>
+        <span class="ob-ic">☁️</span><div><b>Continue with Google</b><small>${g ? "Your data syncs to your own Google Drive, so it's safe if you change phones, and friends can see your live card." : "Google sign-in isn't set up on this copy of the app yet."}</small></div></button>
+      <button class="ob-choice" data-ob="local">
+        <span class="ob-ic">📱</span><div><b>Use on this device only</b><small>Everything stays on this phone and works offline. You can turn on Google sync later, and it's a good idea to download a backup now and then.</small></div></button>
+    </div>
+    <button class="btn ghost small" data-ob="restore">I have a backup or export file</button>
+    <p class="ob-msg small"></p>`;
+}
+function obProfile() {
+  const p = obDraft;
+  return `${obDots(1)}<button class="ob-skip" data-ob="skip">Skip setup</button>
+    <h2>Make it yours</h2><p class="muted small">This is how you'll appear on your card and to friends.</p>
+    <div class="ob-av">${avatarHTML(96, p)}</div>
+    <input type="text" id="obName" class="ob-input" placeholder="Your name" value="${esc(p.name || "")}" maxlength="30">
+    <div class="avatar-grid" style="margin-top:14px">${Object.entries(AVATARS).map(([id, a]) => `<button class="av-pick ${p.avatarPreset === id && !p.avatarImg ? "on" : ""}" data-av="${id}" title="${a.name}">${avatarSVG(id)}</button>`).join("")}</div>
+    <label class="btn small" style="margin-top:6px">📷 Upload a photo<input type="file" id="obPhoto" accept="image/*" hidden></label>
+    ${obNav(1)}`;
+}
+function obLook() {
+  const a = S.appearance, mode = document.documentElement.dataset.mode;
+  return `${obDots(2)}<button class="ob-skip" data-ob="skip">Skip setup</button>
+    <h2>Pick a look</h2><p class="muted small">You can change this any time with the 🌙 button or in Profile.</p>
+    <div class="seg full" style="margin:12px 0">${[["system", "Auto"], ["light", "☀️ Light"], ["dark", "🌙 Dark"]].map(([k, l]) => `<button data-mode="${k}" class="${a.mode === k ? "on" : ""}">${l}</button>`).join("")}</div>
+    <div class="theme-grid">${Object.entries(THEMES).map(([id, t]) => `<button class="theme-sw ${a.theme === id ? "on" : ""}" data-theme="${id}"><i style="background:${themePreview(id, mode)}"></i>${t.name}</button>`).join("")}</div>
+    <div class="seg full" style="margin-top:12px">${[["solid", "Solid"], ["tint", "Tinted"], ["glow", "Glow"]].map(([k, l]) => `<button data-style="${k}" class="${a.style === k ? "on" : ""}">${l}</button>`).join("")}</div>
+    ${obNav(2)}`;
+}
+function obGoal() {
+  const p = obDraft, goals = [["Build muscle", "💪"], ["Get stronger", "🏋️"], ["Lose fat", "🔥"], ["Stay fit", "🧘"]];
+  return `${obDots(3)}<button class="ob-skip" data-ob="skip">Skip setup</button>
+    <h2>Your goal</h2><p class="muted small">This sets your weekly target and the badges you'll chase first.</p>
+    <div class="goal-grid">${goals.map(([g, i]) => `<button class="goal ${p.goal === g ? "on" : ""}" data-goal="${g}"><span>${i}</span>${g}</button>`).join("")}</div>
+    <div class="lbl" style="margin-top:16px">Workouts per week: <b id="obTv">${p.weeklyTarget || 4}</b></div>
+    <input type="range" id="obT" min="1" max="7" value="${p.weeklyTarget || 4}" class="ob-range">
+    ${obNav(3)}`;
+}
+function obFriends() {
+  return `${obDots(4)}
+    <h2>Train with friends</h2><p class="muted small">Share your card and compare streaks, workouts and PRs on a weekly leaderboard.</p>
+    <div class="ob-card">${dogtagHTML({ ...myCardData(), n: obDraft.name || "Lifter" }, true)}</div>
+    <button class="btn block" data-ob="share">📤 Share my card now</button>
+    <p class="small muted" style="text-align:center;margin-top:8px">Got a friend's link? Just open it, and the app will offer to add them.</p>
+    ${obNav(4, "Let's go 💪")}`;
+}
+function obCommit() {
+  const n = $("#obName"); if (n) obDraft.name = n.value.trim();
+  Object.assign(S.profile, { name: obDraft.name, avatarPreset: obDraft.avatarPreset, avatarImg: obDraft.avatarImg, goal: obDraft.goal, weeklyTarget: obDraft.weeklyTarget });
+  save();
+}
+function wireOb(o, step) {
+  const on = (sel, fn) => $$(sel, o).forEach((b) => b.addEventListener("click", fn));
+  on("[data-ob=next]", () => { obCommit(); step >= 4 ? finishOnboarding() : showOnboarding(step + 1); });
+  on("[data-ob=back]", () => { obCommit(); showOnboarding(step - 1); });
+  on("[data-ob=skip]", () => { obCommit(); finishOnboarding(); toast("You can finish setting up in Profile"); });
+  on("[data-ob=local]", () => { S.sync.provider = "local"; save(); showOnboarding(1); });
+  on("[data-ob=google]", async () => {
+    const msg = $(".ob-msg", o); msg.textContent = "Connecting to Google…";
+    S.sync.provider = "drive"; save();
+    await Sync.run(true);
+    if (S.sync.error) { msg.textContent = "⚠️ " + S.sync.error + ". You can try again or use this device only."; S.sync.provider = "local"; save(); return; }
+    applyTheme(S.appearance); obDraft = { ...S.profile };
+    if (S.profile.name && S.workouts.length) { toast(`Welcome back, ${S.profile.name.split(" ")[0]} 👋`); finishOnboarding(); }
+    else showOnboarding(1);
+  });
+  on("[data-ob=restore]", () => {
+    const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".json,.csv";
+    inp.onchange = async () => {
+      const f = inp.files[0]; if (!f) return;
+      try {
+        const text = await f.text(), j = text.trim().startsWith("{") ? JSON.parse(text) : null;
+        if (j && j.version && Array.isArray(j.workouts)) { const keep = S.sync; S = migrate(j); S.sync = keep; S.onboarded = true; invalidate(); save(); applyTheme(S.appearance); toast("Backup restored"); finishOnboarding(); return; }
+        const r = importAny(text, f.name); invalidate(); save(); toast(`Imported ${r.workouts} workouts from ${r.source}`); obDraft = { ...S.profile }; showOnboarding(1);
+      } catch (e) { $(".ob-msg", o).textContent = "⚠️ " + e.message; }
+    };
+    inp.click();
+  });
+  on("[data-ob=share]", shareMyCard);
+  on(".av-pick", (e) => { obCommit(); obDraft.avatarPreset = e.currentTarget.dataset.av; obDraft.avatarImg = ""; showOnboarding(step); });
+  const ph = $("#obPhoto", o); if (ph) ph.onchange = async () => { try { obCommit(); obDraft.avatarImg = await resizeImage(ph.files[0], 192); obDraft.avatarPreset = ""; showOnboarding(step); } catch (e) { toast("Couldn't read that image"); } };
+  const nm = $("#obName", o); if (nm) nm.addEventListener("input", () => { obDraft.name = nm.value; const av = $(".ob-av", o); if (!obDraft.avatarImg && !obDraft.avatarPreset) av.innerHTML = avatarHTML(96, obDraft); });
+  const setA = (k, v) => { S.appearance[k] = v; applyTheme(S.appearance); save(); showOnboarding(step); };
+  on("[data-mode]", (e) => setA("mode", e.currentTarget.dataset.mode));
+  on("[data-theme]", (e) => setA("theme", e.currentTarget.dataset.theme));
+  on("[data-style]", (e) => setA("style", e.currentTarget.dataset.style));
+  on("[data-goal]", (e) => { obDraft.goal = e.currentTarget.dataset.goal; $$("[data-goal]", o).forEach((b) => b.classList.toggle("on", b === e.currentTarget)); });
+  const rg = $("#obT", o); if (rg) rg.oninput = () => { obDraft.weeklyTarget = +rg.value; $("#obTv", o).textContent = rg.value; };
+  wireDogtag(o);
+}
+
 // ---------- boot ----------
 Sync.onStatus((s) => { statusChip(s); if (s === "ok" && tab === "profile") renderProfile(); });
 $("#statusChip").onclick = () => { if (Sync.on() && (syncState === "tap" || S.sync.error)) Sync.run(true); else sheetData(); };
@@ -1473,6 +1719,7 @@ $("#modeBtn").onclick = () => { S.appearance.mode = document.documentElement.dat
 if (darkMQ) darkMQ.addEventListener("change", () => { if (S.appearance.mode === "system") { applyTheme(S.appearance); render(); } });
 applyTheme(S.appearance);
 render();
+if (needsOnboarding()) showOnboarding(0);
 checkFriendLink();
 window.addEventListener("hashchange", checkFriendLink);
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});

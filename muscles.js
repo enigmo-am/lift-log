@@ -72,6 +72,99 @@ const EXERCISE_MUSCLES = {
   "Side Plank": { p: ["obliques"], s: ["abs"] },
 };
 
+
+// ---- extended library (common gym exercises) ----
+Object.assign(EXERCISE_MUSCLES, {
+  // chest
+  "Incline Barbell Bench Press": { p: ["chest", "frontDelts"], s: ["triceps"] },
+  "Decline Bench Press": { p: ["chest"], s: ["triceps"] },
+  "Close Grip Bench Press": { p: ["triceps", "chest"], s: ["frontDelts"] },
+  "Dumbbell Fly": { p: ["chest"], s: ["frontDelts"] },
+  "Incline Dumbbell Fly": { p: ["chest"], s: ["frontDelts"] },
+  "Cable Crossover": { p: ["chest"], s: ["frontDelts"] },
+  "Pec Deck": { p: ["chest"], s: [] },
+  "Machine Chest Press": { p: ["chest"], s: ["frontDelts", "triceps"] },
+  "Smith Machine Bench Press": { p: ["chest"], s: ["frontDelts", "triceps"] },
+  "Dips": { p: ["chest", "triceps"], s: ["frontDelts"] },
+  "Assisted Dips": { p: ["chest", "triceps"], s: ["frontDelts"] },
+  // shoulders
+  "Overhead Press": { p: ["frontDelts"], s: ["sideDelts", "triceps", "traps"] },
+  "Arnold Press": { p: ["frontDelts", "sideDelts"], s: ["triceps"] },
+  "Cable Lateral Raise": { p: ["sideDelts"], s: [] },
+  "Machine Lateral Raise": { p: ["sideDelts"], s: [] },
+  "Dumbbell Front Raise": { p: ["frontDelts"], s: [] },
+  "Upright Row": { p: ["sideDelts", "traps"], s: ["biceps"] },
+  "Reverse Pec Deck": { p: ["rearDelts"], s: ["upperBack"] },
+  "Bent Over Rear Delt Raise": { p: ["rearDelts"], s: ["upperBack"] },
+  // triceps
+  "Overhead Cable Triceps Extension": { p: ["triceps"], s: [] },
+  "Overhead Dumbbell Triceps Extension": { p: ["triceps"], s: [] },
+  "Rope Pushdown": { p: ["triceps"], s: [] },
+  "Bench Dips": { p: ["triceps"], s: ["chest", "frontDelts"] },
+  // back
+  "Chin Ups": { p: ["lats", "biceps"], s: ["upperBack"] },
+  "Assisted Pull Ups": { p: ["lats"], s: ["upperBack", "biceps"] },
+  "Close Grip Lat Pulldown": { p: ["lats"], s: ["upperBack", "biceps"] },
+  "Straight Arm Pulldown": { p: ["lats"], s: [] },
+  "Barbell Row": { p: ["upperBack", "lats"], s: ["rearDelts", "biceps", "lowerBack"] },
+  "Pendlay Row": { p: ["upperBack", "lats"], s: ["rearDelts", "biceps", "lowerBack"] },
+  "T-Bar Row": { p: ["upperBack", "lats"], s: ["rearDelts", "biceps"] },
+  "Single Arm Dumbbell Row": { p: ["lats", "upperBack"], s: ["rearDelts", "biceps"] },
+  "Inverted Row": { p: ["upperBack", "lats"], s: ["biceps", "rearDelts"] },
+  "Barbell Shrug": { p: ["traps"], s: [] },
+  "Deadlift": { p: ["glutes", "hamstrings", "lowerBack"], s: ["quads", "traps", "forearms"] },
+  "Barbell Deadlift": { p: ["glutes", "hamstrings", "lowerBack"], s: ["quads", "traps", "forearms"] },
+  "Trap Bar Deadlift": { p: ["quads", "glutes"], s: ["hamstrings", "lowerBack", "traps"] },
+  "Romanian Deadlift": { p: ["hamstrings", "glutes"], s: ["lowerBack"] },
+  "Dumbbell Romanian Deadlift": { p: ["hamstrings", "glutes"], s: ["lowerBack"] },
+  "Good Morning": { p: ["hamstrings", "lowerBack"], s: ["glutes"] },
+  "Hyperextension": { p: ["lowerBack", "glutes"], s: ["hamstrings"] },
+  // arms
+  "EZ Bar Curl": { p: ["biceps"], s: ["forearms"] },
+  "Preacher Curl": { p: ["biceps"], s: [] },
+  "Cable Curl": { p: ["biceps"], s: ["forearms"] },
+  "Concentration Curl": { p: ["biceps"], s: [] },
+  "Reverse Curl": { p: ["forearms", "biceps"], s: [] },
+  "Reverse Wrist Curl": { p: ["forearms"], s: [] },
+  "Farmer's Walk": { p: ["forearms", "traps"], s: ["abs", "quads"] },
+  "Dead Hang": { p: ["forearms"], s: ["lats"] },
+  // legs
+  "Front Squat": { p: ["quads"], s: ["glutes", "abs", "upperBack"] },
+  "Goblet Squat": { p: ["quads", "glutes"], s: ["abs"] },
+  "Hack Squat": { p: ["quads"], s: ["glutes"] },
+  "Smith Machine Squat": { p: ["quads", "glutes"], s: ["hamstrings"] },
+  "Leg Press": { p: ["quads", "glutes"], s: ["hamstrings"] },
+  "Walking Lunge": { p: ["quads", "glutes"], s: ["hamstrings"] },
+  "Dumbbell Lunge": { p: ["quads", "glutes"], s: ["hamstrings"] },
+  "Reverse Lunge": { p: ["glutes", "quads"], s: ["hamstrings"] },
+  "Step Ups": { p: ["quads", "glutes"], s: ["hamstrings"] },
+  "Lying Leg Curl": { p: ["hamstrings"], s: ["calves"] },
+  "Nordic Curl": { p: ["hamstrings"], s: [] },
+  "Hip Thrust": { p: ["glutes"], s: ["hamstrings"] },
+  "Barbell Hip Thrust": { p: ["glutes"], s: ["hamstrings"] },
+  "Glute Bridge": { p: ["glutes"], s: ["hamstrings"] },
+  "Cable Kickback": { p: ["glutes"], s: ["hamstrings"] },
+  "Hip Abduction Machine": { p: ["glutes"], s: [] },
+  "Standing Calf Raise": { p: ["calves"], s: [] },
+  "Seated Calf Raise": { p: ["calves"], s: [] },
+  "Leg Press Calf Raise": { p: ["calves"], s: [] },
+  // core
+  "Crunch": { p: ["abs"], s: [] },
+  "Cable Crunch": { p: ["abs"], s: [] },
+  "Ab Wheel Rollout": { p: ["abs"], s: ["obliques", "lats"] },
+  "Russian Twist": { p: ["obliques"], s: ["abs"] },
+  "Bicycle Crunch": { p: ["abs", "obliques"], s: [] },
+  "Mountain Climbers": { p: ["abs"], s: ["frontDelts", "quads"] },
+  "Dead Bug": { p: ["abs"], s: [] },
+  "Pallof Press": { p: ["obliques", "abs"], s: [] },
+  "Cable Woodchop": { p: ["obliques"], s: ["abs"] },
+  "V Ups": { p: ["abs"], s: [] },
+});
+
+// Your own exercises: tagged by you in the app, stored with your data.
+function customMuscles() { return (typeof S !== "undefined" && S && S.customEx) || {}; }
+function knownExercise(name) { return !!(customMuscles()[name] || EXERCISE_MUSCLES[name]); }
+
 // Keyword fallback for exercises not in the table (e.g. ones a friend adds).
 const KEYWORDS = [
   [/bench|chest|fly|push ?up|\bdips?\b/i, { p: ["chest"], s: ["triceps", "frontDelts"] }],
@@ -94,6 +187,7 @@ const KEYWORDS = [
 ];
 
 function musclesFor(name) {
+  const c = customMuscles()[name]; if (c) return c;
   if (EXERCISE_MUSCLES[name]) return EXERCISE_MUSCLES[name];
   for (const [re, m] of KEYWORDS) if (re.test(name)) return m;
   return { p: [], s: [] };

@@ -133,7 +133,7 @@ const Sync = (() => {
     [...(olderW.friends || []), ...(newer.friends || [])].forEach((f) => friends.set(f.key, f));
     return {
       ...local,
-      profile: newer.profile, routines: newer.routines, uni: newer.uni || {}, showcase: newer.showcase || [],
+      profile: newer.profile, routines: newer.routines, customEx: newer.customEx || {}, appearance: newer.appearance || local.appearance, uni: newer.uni || {}, showcase: newer.showcase || [],
       workouts: [...byId.values()].filter((w) => !del.w.includes(w.id)),
       restDays: [...new Set([...(local.restDays || []), ...(remote.restDays || [])])].filter((d) => !del.r.includes(d)).sort(),
       weights: [...weights.values()].filter((x) => !del.wt.includes(x.date)),

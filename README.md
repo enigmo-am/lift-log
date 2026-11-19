@@ -21,6 +21,9 @@ A free, offline workout logger that runs in your phone's browser. No account, no
 - **Ask an AI coach:** one tap copies a 4-week training summary to paste into Claude, Gemini or ChatGPT.
 - **Spotify:** your gym playlist plays from the home page.
 - **Storage choice:** keep data on the device only, or auto-sync to your own Google Drive.
+- **Welcome flow:** on first launch, choose Google (synced) or This device (local), then a skippable 4-step setup: name and avatar, look, goal, and friends. You can also restore a backup or import from another app right away.
+- **Starts empty:** new users pick a template (Push/Pull/Legs, Upper/Lower, Full body) or build their own routines.
+- **Exercise library:** 130 built-in exercises with muscle tags. A new exercise name gets tagged by tapping muscles on the body figure, once for a main muscle and twice for a helper. You can edit any exercise's muscles in Profile → Exercise library.
 - **Themes:** 8 eye-friendly colour themes (Classic, Ocean, Forest, Sunset, Lavender, Sakura, Sand, Graphite), light, dark or auto mode, and Solid, Tinted or Glow backgrounds. There's a quick 🌙/☀️ toggle in the top bar.
 - **Backup status chip** in the top bar: 💾 shows how long since your last backup, and ☁️ shows sync status. Tap it for exact timestamps and a **Back up now** button.
 - **Import data** from Arrow (JSON), Strong (CSV), Hevy (CSV), any spreadsheet (CSV with date, exercise, weight, reps) or another Lift Log backup. The file type is detected automatically.

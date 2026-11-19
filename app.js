@@ -758,8 +758,22 @@ function renderProgress() {
 }
 
 // ---------- charts ----------
+let _gid = 0;
+// smooth path through points (monotone-ish Catmull-Rom → cubic Bézier, clamped so it never overshoots)
+function smoothPath(P) {
+  if (P.length < 3) return P.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join("");
+  let d = `M${P[0][0].toFixed(1)},${P[0][1].toFixed(1)}`;
+  for (let i = 0; i < P.length - 1; i++) {
+    const p0 = P[i - 1] || P[i], p1 = P[i], p2 = P[i + 1], p3 = P[i + 2] || p2, t = 0.18;
+    let c1y = p1[1] + (p2[1] - p0[1]) * t, c2y = p2[1] - (p3[1] - p1[1]) * t;
+    const lo = Math.min(p1[1], p2[1]), hi = Math.max(p1[1], p2[1]);
+    c1y = Math.min(hi, Math.max(lo, c1y)); c2y = Math.min(hi, Math.max(lo, c2y));
+    d += `C${(p1[0] + (p2[0] - p0[0]) * t).toFixed(1)},${c1y.toFixed(1)} ${(p2[0] - (p3[0] - p1[0]) * t).toFixed(1)},${c2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+  }
+  return d;
+}
 function lineChart(box, pts, unit, opt = {}) {
-  const W = 360, H = opt.h || 200, L = 38, R = 10, T = 12, B = 24;
+  const W = 360, H = opt.h || 200, L = 34, R = 14, T = 22, B = 24, id = "g" + ++_gid;
   if (!pts.length) { box.innerHTML = `<p class="small muted">No data yet.</p>`; return; }
   if (pts.length === 1) pts = [pts[0], pts[0]];
   const t0 = parseYmd(pts[0].date).getTime(), t1 = parseYmd(pts[pts.length - 1].date).getTime();
@@ -768,49 +782,82 @@ function lineChart(box, pts, unit, opt = {}) {
   const pv = (hi - lo) * 0.15 || hi * 0.1 || 1; lo = opt.zero ? 0 : Math.max(0, lo - pv); hi += pv;
   const x = (d) => L + ((parseYmd(d).getTime() - t0) / (t1 - t0 || 1)) * (W - L - R);
   const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
-  const ticks = niceTicks(lo, hi, 4);
+  const ticks = niceTicks(lo, hi, 3);
   let runMax = -Infinity;
   const pr = pts.map((p) => { const isPr = opt.prs && p.v > runMax; runMax = Math.max(runMax, p.v); return isPr; });
-  const path = pts.map((p, i) => `${i ? "L" : "M"}${x(p.date).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
-  const area = opt.area ? `<path class="area" d="${path}L${x(pts.at(-1).date)},${y(lo)}L${x(pts[0].date)},${y(lo)}Z"/>` : "";
-  const xt = [pts[0], pts[Math.floor(pts.length / 2)], pts[pts.length - 1]];
+  const P = pts.map((p) => [x(p.date), y(p.v)]);
+  const path = smoothPath(P);
+  const area = `${path}L${P.at(-1)[0]},${H - B}L${P[0][0]},${H - B}Z`;
   const tk = (v) => (v >= 1000 ? round1(v / 1000) + "k" : round1(v));
+  const last = pts.at(-1), bi = vs.indexOf(Math.max(...vs));
+  const fmtV = (v) => (unit === " kg" && v >= 1000 ? fmtKg(v) : round1(v) + unit);
+  const xt = [pts[0], pts[pts.length - 1]];
   box.innerHTML = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img">
-    ${ticks.map((t) => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="axis" x="${L - 6}" y="${y(t) + 4}" text-anchor="end">${tk(t)}</text>`).join("")}
-    ${xt.map((p, i) => `<text class="axis" x="${x(p.date)}" y="${H - 7}" text-anchor="${i === 0 ? "start" : i === 2 ? "end" : "middle"}">${fmtShort(p.date)}</text>`).join("")}
-    ${area}<path class="line" d="${path}"/>
-    ${pts.length <= 60 ? pts.map((p, i) => `<circle class="${pr[i] ? "pr" : "dot"}" cx="${x(p.date)}" cy="${y(p.v)}" r="${pr[i] ? 5 : 4}"/>`).join("") : ""}
-    <line class="cross" y1="${T}" y2="${H - B}" visibility="hidden"/>
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".32"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+    ${ticks.map((t) => `<line class="grid dash" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="axis" x="${L - 6}" y="${y(t) + 4}" text-anchor="end">${tk(t)}</text>`).join("")}
+    ${xt.map((p, i) => `<text class="axis" x="${x(p.date)}" y="${H - 6}" text-anchor="${i ? "end" : "start"}">${fmtShort(p.date)}</text>`).join("")}
+    <path d="${area}" fill="url(#${id})" class="area-in"/>
+    <path class="line glowline" d="${path}"/>
+    ${pts.length <= 40 ? pts.map((p, i) => pr[i] ? `<circle class="pr" cx="${P[i][0]}" cy="${P[i][1]}" r="4.5"/>` : "").join("") : ""}
+    ${pts.length > 2 && bi !== pts.length - 1 ? `<g class="peak"><circle cx="${P[bi][0]}" cy="${P[bi][1]}" r="3"/><text x="${P[bi][0]}" y="${P[bi][1] - 9}" text-anchor="middle">${opt.peakLabel || "best"} ${tk(vs[bi])}</text></g>` : ""}
+    <circle class="endpt" cx="${P.at(-1)[0]}" cy="${P.at(-1)[1]}" r="5"/>
+    <g class="endlbl" transform="translate(${Math.min(P.at(-1)[0], W - 40)},${Math.max(P.at(-1)[1] - 14, 12)})"><rect x="-30" y="-12" width="60" height="18" rx="9"/><text y="1" text-anchor="middle">${tk(last.v)}${unit === " kg" ? "" : unit}</text></g>
+    <line class="cross" y1="${T}" y2="${H - B}" visibility="hidden"/><circle class="hoverpt" r="5" visibility="hidden"/>
     <rect class="hit" x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent"/></svg>`;
-  const svg = $("svg", box), cross = $(".cross", box), hit = $(".hit", box);
+  const svg = $("svg", box), cross = $(".cross", box), hp = $(".hoverpt", box), hit = $(".hit", box);
   const move = (ev) => {
     const bb = svg.getBoundingClientRect(), cx = ((ev.clientX - bb.left) / bb.width) * W;
-    let bi = 0, bd = Infinity;
-    pts.forEach((p, i) => { const d = Math.abs(x(p.date) - cx); if (d < bd) { bd = d; bi = i; } });
-    const p = pts[bi];
-    cross.setAttribute("x1", x(p.date)); cross.setAttribute("x2", x(p.date)); cross.setAttribute("visibility", "visible");
-    showTip(ev.clientX, ev.clientY, `<b>${opt.label ? opt.label(p) : fmtDate(p.date)}</b><br>${unit === " kg" && p.v >= 1000 ? fmtKg(p.v) : round1(p.v) + unit}${pr[bi] ? " · new best" : ""}${p.tip ? "<br>" + esc(p.tip) : ""}`);
+    let i = 0, bd = Infinity; P.forEach((q, j) => { const d = Math.abs(q[0] - cx); if (d < bd) { bd = d; i = j; } });
+    const p = pts[i];
+    cross.setAttribute("x1", P[i][0]); cross.setAttribute("x2", P[i][0]); cross.setAttribute("visibility", "visible");
+    hp.setAttribute("cx", P[i][0]); hp.setAttribute("cy", P[i][1]); hp.setAttribute("visibility", "visible");
+    showTip(ev.clientX, ev.clientY, `<b>${opt.label ? opt.label(p) : fmtDate(p.date)}</b><br>${fmtV(p.v)}${pr[i] ? " · new best" : ""}${p.tip ? "<br>" + esc(p.tip) : ""}`);
   };
   hit.addEventListener("pointermove", move); hit.addEventListener("pointerdown", move);
-  hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+  hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hp.setAttribute("visibility", "hidden"); hideTip(); });
 }
 function barChart(box, data, opt = {}) {
-  // data: [{label, v, tip}]
-  const W = 360, H = opt.h || 150, L = 26, B = 22, T = 10, n = data.length;
-  const max = Math.max(opt.min || 1, ...data.map((d) => d.v));
-  const ticks = niceTicks(0, max, 3), top = Math.max(max, ticks.at(-1));
-  const bw = (W - L) / n, gap = Math.min(8, bw * 0.25);
-  const y = (v) => T + (1 - v / top) * (H - T - B);
+  // data: [{label, v, tip, hl}]; opt: {h, every, min, target, targetLabel, values}
+  const W = 360, H = opt.h || 160, L = 8, R = 8, B = 22, T = 20, n = data.length, id = "b" + ++_gid;
+  const max = Math.max(opt.min || 1, opt.target || 0, ...data.map((d) => d.v));
+  const bw = (W - L - R) / n, gap = Math.max(4, bw * 0.28);
+  const y = (v) => T + (1 - v / max) * (H - T - B);
+  const best = Math.max(...data.map((d) => d.v));
   box.innerHTML = `<svg class="chart" viewBox="0 0 ${W} ${H}">
-    ${ticks.map((t) => `<line class="grid" x1="${L}" x2="${W}" y1="${y(t)}" y2="${y(t)}"/><text class="axis" x="${L - 5}" y="${y(t) + 4}" text-anchor="end">${t >= 1000 ? round1(t / 1000) + "k" : round1(t)}</text>`).join("")}
-    ${data.map((d, i) => { const x0 = L + i * bw + gap / 2, x1 = L + (i + 1) * bw - gap / 2, yy = y(d.v), r = Math.min(4, (x1 - x0) / 2, y(0) - yy);
-      return d.v > 0 ? `<path d="M${x0},${y(0)} V${yy + r} Q${x0},${yy} ${x0 + r},${yy} H${x1 - r} Q${x1},${yy} ${x1},${yy + r} V${y(0)} Z" class="bar${d.hl ? " hl" : ""}"/>` : ""; }).join("")}
-    ${data.map((d, i) => (opt.every ? i % opt.every === 0 || i === n - 1 : true) ? `<text class="axis" x="${i === n - 1 && opt.every ? W : L + i * bw + bw / 2}" y="${H - 6}" text-anchor="${i === n - 1 && opt.every ? "end" : "middle"}">${esc(d.label)}</text>` : "").join("")}
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--accent)" stop-opacity=".55"/></linearGradient></defs>
+    <line class="grid" x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}"/>
+    ${data.map((d, i) => { const x0 = L + i * bw + gap / 2, w = bw - gap;
+      return `<rect x="${x0}" y="${T}" width="${w}" height="${y(0) - T}" rx="${Math.min(6, w / 2)}" class="bar-bg"/>` +
+        (d.v > 0 ? `<rect x="${x0}" y="${y(d.v)}" width="${w}" height="${y(0) - y(d.v)}" rx="${Math.min(6, w / 2)}" fill="url(#${id})" class="bar2 ${d.hl || (opt.values && d.v === best) ? "hl" : ""}" style="animation-delay:${i * 30}ms"/>` : "") +
+        ((opt.values && d.v > 0) || (d.hl && d.v > 0) ? `<text class="bval" x="${x0 + w / 2}" y="${y(d.v) - 5}" text-anchor="middle">${d.v}</text>` : ""); }).join("")}
+    ${opt.target ? `<line class="target-line" x1="${L}" x2="${W - R}" y1="${y(opt.target)}" y2="${y(opt.target)}"/><text class="tlbl" x="${W - R}" y="${y(opt.target) - 5}" text-anchor="end">${opt.targetLabel || "goal"} ${opt.target}</text>` : ""}
+    ${data.map((d, i) => (opt.every ? i % opt.every === 0 || i === n - 1 : true) ? `<text class="axis" x="${L + i * bw + bw / 2}" y="${H - 6}" text-anchor="middle">${esc(d.label)}</text>` : "").join("")}
     ${data.map((d, i) => `<rect x="${L + i * bw}" y="0" width="${bw}" height="${H}" fill="transparent" data-i="${i}" class="hitb"/>`).join("")}
   </svg>`;
   $$(".hitb", box).forEach((r) => {
     const f = (ev) => { const d = data[+r.dataset.i]; showTip(ev.clientX, ev.clientY, d.tip); };
     r.addEventListener("pointerenter", f); r.addEventListener("pointerdown", f); r.addEventListener("pointerleave", hideTip);
+  });
+}
+// 24-hour clock: one petal per hour, length = workouts started in that hour
+function clockChart(box, hours) {
+  const S0 = 280, c = S0 / 2, r0 = 34, r1 = 112, counts = Array(24).fill(0);
+  hours.forEach((h) => counts[h % 24]++);
+  const max = Math.max(1, ...counts), peak = counts.indexOf(Math.max(...counts));
+  const arc = (h, rr) => { const a0 = ((h - 6) / 24) * 2 * Math.PI + 0.03, a1 = ((h - 5) / 24) * 2 * Math.PI - 0.03;
+    const p = (a, r) => `${(c + Math.cos(a) * r).toFixed(1)},${(c + Math.sin(a) * r).toFixed(1)}`;
+    return `M${p(a0, r0)}L${p(a0, rr)}A${rr},${rr} 0 0 1 ${p(a1, rr)}L${p(a1, r0)}A${r0},${r0} 0 0 0 ${p(a0, r0)}Z`; };
+  box.innerHTML = `<svg class="chart clock" viewBox="0 0 ${S0} ${S0}">
+    <circle cx="${c}" cy="${c}" r="${r1}" class="clock-ring"/><circle cx="${c}" cy="${c}" r="${(r0 + r1) / 2}" class="clock-ring"/>
+    ${counts.map((v, h) => `<path d="${arc(h, r0 + 4)}" class="petal-bg"/>${v ? `<path d="${arc(h, r0 + 4 + (r1 - r0 - 4) * (v / max))}" class="petal ${h === peak ? "hl" : ""}" data-h="${h}"/>` : ""}`).join("")}
+    ${[0, 6, 12, 18].map((h) => { const a = ((h - 6) / 24) * 2 * Math.PI; return `<text class="axis" x="${c + Math.cos(a) * (r1 + 14)}" y="${c + Math.sin(a) * (r1 + 14) + 4}" text-anchor="middle">${h === 0 ? "0h" : h + "h"}</text>`; }).join("")}
+    <text x="${c}" y="${c - 4}" text-anchor="middle" class="clock-big">${hours.length ? pad(peak) + ":00" : "–"}</text>
+    <text x="${c}" y="${c + 13}" text-anchor="middle" class="axis">favourite</text>
+    ${counts.map((v, h) => `<path d="${arc(h, r1)}" fill="transparent" data-i="${h}" class="hitc"/>`).join("")}
+  </svg>`;
+  $$(".hitc", box).forEach((el) => {
+    const f = (ev) => { const h = +el.dataset.i; showTip(ev.clientX, ev.clientY, `<b>${pad(h)}:00–${pad((h + 1) % 24)}:00</b><br>${counts[h]} workout${counts[h] === 1 ? "" : "s"} started`); };
+    el.addEventListener("pointerenter", f); el.addEventListener("pointerdown", f); el.addEventListener("pointerleave", hideTip);
   });
 }
 function radarChart(box, axes) {
@@ -929,8 +976,10 @@ function renderStats() {
   </div>
   <div class="card"><h2>Muscle balance</h2><p class="small muted" style="margin-top:-4px">Last 4 weeks vs target. The dashed line is 100%, so a lopsided shape means some groups are getting more than others.</p><div id="radar"></div></div>
   <div class="card"><h2>Where your sets go</h2><p class="small muted" style="margin-top:-4px">Share of all sets, last 4 weeks</p>
-    <div class="bars dist">${Object.keys(GROUPS).map((g) => [g, groupSum(g, m4) / totalSets4]).sort((a, b) => b[1] - a[1]).map(([g, f]) =>
-      `<div class="b"><span>${g}</span><div class="track"><div class="fill" style="width:${f * 100}%"></div></div><span class="v">${Math.round(f * 100)}%</span></div>`).join("")}</div></div>
+    <div class="dist2">${(() => { const arr = Object.keys(GROUPS).map((g) => [g, groupSum(g, m4) / totalSets4, groupSum(g, m4)]).sort((a, b) => b[1] - a[1]); const mx = arr[0][1] || 1;
+      const ic = { Chest: "🫁", Back: "🦅", Shoulders: "🛡️", Arms: "💪", Legs: "🦵", Core: "🎯" };
+      return arr.map(([g, f, n], i) => `<div class="drow"><span class="dic">${ic[g]}</span><div class="dbody"><div class="dtop"><b>${g}</b><span>${Math.round(f * 100)}% · ${round1(n)} sets</span></div>
+        <div class="dtrack"><i style="width:${(f / mx) * 100}%;animation-delay:${i * 60}ms"></i></div></div></div>`).join(""); })()}</div></div>
   <div class="card"><h2>Weekly volume</h2><div id="volChart"></div></div>
   <div class="card"><h2>Workouts per week</h2><div id="wkChart"></div></div>
   <div class="card"><h2>Consistency</h2>
@@ -940,7 +989,7 @@ function renderStats() {
     <div class="legend"><span><i class="sw l0"></i>no log</span><span><i style="box-shadow:inset 0 0 0 1.5px var(--s2)"></i>rest day</span>
       <span><i class="sw l2"></i>light</span><span><i class="sw l3"></i>medium</span><span><i class="sw l4"></i>big session</span></div></div>
   <div class="card"><h2>Favourite training days</h2><div id="dowChart"></div></div>
-  <div class="card"><h2>When you train</h2><div id="todChart"></div>${avgDur ? `<p class="small muted">Average session: <b>${avgDur} min</b> (last ${durs.length})</p>` : ""}</div>
+  <div class="card"><h2>When you train</h2><p class="small muted" style="margin-top:-4px">Each petal is an hour of the day; longer = more workouts started then.</p><div id="todChart"></div>${avgDur ? `<p class="small muted">Average session: <b>${avgDur} min</b> (last ${durs.length})</p>` : ""}</div>
   <div class="card"><h2>Ask an AI coach 🤖</h2><p class="small ink2">Copies a summary of your last 4 weeks (workouts, top sets, sets per muscle, coach notes). Paste it into Claude, Gemini or ChatGPT and ask for advice.</p>
     <button class="btn" id="copyCoach">📋 Copy my summary</button></div>
   <div class="card"><h2>All time</h2><div class="hero">
@@ -971,14 +1020,12 @@ function renderStats() {
     const ws = addDays(wk, -7 * i), we = addDays(ws, 6), ss = liftSessions().filter((w) => w.date >= ws && w.date <= we);
     weeks.push({ ws, c: ss.length, vol: ss.reduce((a, w) => a + w.sets.reduce((b, s) => b + setVol(s), 0), 0), sets: ss.reduce((a, w) => a + w.sets.length, 0) });
   }
-  lineChart($("#volChart"), weeks.map((w) => ({ date: w.ws, v: w.vol, tip: `${w.c} workouts · ${w.sets} sets` })), " kg", { area: true, zero: true, h: 170, label: (p) => "Week of " + fmtShort(p.date) });
-  barChart($("#wkChart"), weeks.map((w, i) => ({ label: fmtShort(w.ws), v: w.c, hl: i === 11, tip: `<b>Week of ${fmtShort(w.ws)}</b><br>${w.c} workout${w.c === 1 ? "" : "s"}` })), { every: 3, min: +S.profile.weeklyTarget || 5 });
+  lineChart($("#volChart"), weeks.map((w) => ({ date: w.ws, v: w.vol, tip: `${w.c} workouts · ${w.sets} sets` })), " kg", { zero: true, h: 180, peakLabel: "best week", label: (p) => "Week of " + fmtShort(p.date) });
+  barChart($("#wkChart"), weeks.map((w, i) => ({ label: fmtShort(w.ws), v: w.c, hl: i === 11, tip: `<b>Week of ${fmtShort(w.ws)}</b><br>${w.c} workout${w.c === 1 ? "" : "s"}` })), { every: 3, target: +S.profile.weeklyTarget || 5, targetLabel: "goal" });
   const dow = [1, 2, 3, 4, 5, 6, 0].map((d) => ({ label: DAYS[d], v: liftSessions().filter((w) => parseYmd(w.date).getDay() === d).length }));
   dow.forEach((d) => (d.tip = `<b>${d.label}</b><br>${d.v} workouts`));
-  barChart($("#dowChart"), dow, {});
-  const slots = [["Early", 5, 9], ["Morning", 9, 12], ["Afternoon", 12, 17], ["Evening", 17, 21], ["Night", 21, 29]];
-  const hrs = S.workouts.filter((w) => w.start).map((w) => { const h = +w.start.slice(0, 2); return h < 5 ? h + 24 : h; });
-  barChart($("#todChart"), slots.map(([l, a, b]) => { const v = hrs.filter((h) => h >= a && h < b).length; return { label: l, v, tip: `<b>${l}</b> (${a % 24}:00–${b % 24}:00)<br>${v} workouts` }; }), {});
+  barChart($("#dowChart"), dow, { values: true, h: 150 });
+  clockChart($("#todChart"), S.workouts.filter((w) => w.start).map((w) => +w.start.slice(0, 2)));
   calendar($("#cal"));
 }
 function calendar(el) {
@@ -1001,25 +1048,14 @@ function calendar(el) {
 
 // ---------- routine templates & exercise tagging ----------
 const TEMPLATES = {
-  ppl: { name: "Push / Pull / Legs", desc: "6 days · each muscle twice a week", routines: [
-    { name: "Push", day: 1, exercises: ["Barbell Bench Press", "Dumbbell Shoulder Press", "Incline Dumbbell Press", "Dumbbell Lateral Raise", "Cable Tricep Pushdown", "Overhead Dumbbell Triceps Extension"] },
-    { name: "Pull", day: 2, exercises: ["Pull Ups", "Barbell Row", "Cable Lat Pulldown", "Cable Face Pull", "Dumbbell Bicep Curl", "Dumbbell Hammer Curl"] },
-    { name: "Legs", day: 3, exercises: ["Barbell Squat", "Romanian Deadlift", "Leg Press", "Seated Leg Curl Machine", "Standing Calf Raise", "Hanging Leg Raise"] },
-    { name: "Push", day: 4, exercises: ["Overhead Press", "Incline Dumbbell Press", "Chest Fly Machine", "Cable Lateral Raise", "Dips"] },
-    { name: "Pull", day: 5, exercises: ["Chin Ups", "Seated Cable Rows", "Rear Delt Fly", "Barbell Shrug", "Incline Dumbbell Curl"] },
-    { name: "Legs", day: 6, exercises: ["Front Squat", "Hip Thrust", "Walking Lunge", "Lying Leg Curl", "Seated Calf Raise", "Cable Crunch"] } ] },
   ul: { name: "Upper / Lower", desc: "4 days · balanced and simple", routines: [
     { name: "Upper A", day: 1, exercises: ["Barbell Bench Press", "Barbell Row", "Overhead Press", "Cable Lat Pulldown", "Dumbbell Bicep Curl", "Cable Tricep Pushdown"] },
     { name: "Lower A", day: 2, exercises: ["Barbell Squat", "Romanian Deadlift", "Leg Press", "Standing Calf Raise", "Planks"] },
     { name: "Upper B", day: 4, exercises: ["Incline Dumbbell Press", "Pull Ups", "Dumbbell Shoulder Press", "Seated Cable Rows", "Dumbbell Hammer Curl", "Overhead Dumbbell Triceps Extension"] },
     { name: "Lower B", day: 5, exercises: ["Deadlift", "Dumbbell Bulgarian Split Squat", "Seated Leg Curl Machine", "Seated Calf Raise", "Hanging Leg Raise"] } ] },
-  fb: { name: "Full body", desc: "3 days · great for beginners", routines: [
-    { name: "Full body A", day: 1, exercises: ["Barbell Squat", "Barbell Bench Press", "Barbell Row", "Dumbbell Lateral Raise", "Planks"] },
-    { name: "Full body B", day: 3, exercises: ["Deadlift", "Overhead Press", "Cable Lat Pulldown", "Dumbbell Bicep Curl", "Cable Tricep Pushdown"] },
-    { name: "Full body C", day: 5, exercises: ["Leg Press", "Incline Dumbbell Press", "Seated Cable Rows", "Dumbbell Lunge", "Hanging Leg Raise"] } ] },
 };
 function chooseTemplate() {
-  openModal(`<h2>Start from a template</h2><p class="small muted">You can rename, reorder and swap every exercise afterwards.</p>
+  openModal(`<h2>Start from a template</h2><p class="small muted">A simple, balanced 4-day plan.</p><p class="small muted">You can rename, reorder and swap every exercise afterwards.</p>
     <div class="rlist">${Object.entries(TEMPLATES).map(([id, t]) => `<button class="rrow" data-t="${id}"><div class="rmeta"><b>${t.name}</b><span class="small muted">${t.desc}</span></div><span class="chev">›</span></button>`).join("")}</div>
     <button class="btn block" id="blankR" style="margin-top:10px">+ Build my own from scratch</button>`, (sh) => {
     $$("[data-t]", sh).forEach((b) => (b.onclick = () => {
@@ -1613,15 +1649,20 @@ function showOnboarding(step = 0) {
   let o = $("#onboard");
   if (!o) { o = document.createElement("div"); o.id = "onboard"; o.className = "onboard"; document.body.appendChild(o); document.body.classList.add("ob-open"); }
   const steps = [obWelcome, obProfile, obLook, obGoal, obFriends];
-  o.innerHTML = `<div class="ob-inner">${steps[step]()}</div>`;
+  o.innerHTML = `${obArt(step)}<div class="ob-inner">${steps[step]()}</div>`;
   wireOb(o, step);
 }
 const obDots = (i) => `<div class="ob-dots">${[1, 2, 3, 4].map((n) => `<i class="${n === i ? "on" : n < i ? "done" : ""}"></i>`).join("")}</div>`;
 const obNav = (i, nextLabel = "Next") => `<div class="ob-nav">${i > 1 ? `<button class="btn ghost" data-ob="back">Back</button>` : `<span></span>`}
   <button class="btn primary" data-ob="next">${nextLabel}</button></div>`;
+function obArt(step) {
+  // soft, slow-moving colour blobs + a faint dot grid; the welcome screen also gets a ring of avatars
+  return `<div class="ob-art ${step === 0 ? "welcome" : ""}" aria-hidden="true"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span><div class="dots"></div></div>`;
+}
 function obWelcome() {
   const g = Sync.available();
-  return `<div class="ob-hero"><img src="icon.svg" alt="" class="ob-logo"><h1>Lift Log</h1><p class="muted">Your workouts, streaks and progress, free with no ads.</p></div>
+  const ring = ["bear", "fox", "robot", "panda", "owl", "lion", "rocket", "shark"];
+  return `<div class="ob-hero"><div class="ob-orbit">${ring.map((id, i) => `<span class="orb" style="--a:${i * 45}deg;--d:${(i % 3) * 0.7}s">${avatarSVG(id)}</span>`).join("")}<img src="icon.svg" alt="" class="ob-logo"></div><h1>Lift Log</h1><p class="muted">Your workouts, streaks and progress, free with no ads.</p></div>
     <div class="ob-choices">
       <button class="ob-choice" data-ob="google" ${g ? "" : "disabled"}>
         <span class="ob-ic">☁️</span><div><b>Continue with Google</b><small>${g ? "Your data syncs to your own Google Drive, so it's safe if you change phones, and friends can see your live card." : "Google sign-in isn't set up on this copy of the app yet."}</small></div></button>

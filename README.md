@@ -88,6 +88,7 @@ After you change any file, update `VERSION` in `sw.js` (for example `liftlog-v4`
 | `app.js` | All app logic: logger, streak, charts, import and backup |
 | `avatars.js` | Built-in avatar illustrations |
 | `sync.js`, `config.js` | Optional Google Drive sync and its settings |
+| `fonts/` | Outfit heading font (SIL Open Font License, see `fonts/OFL.txt`) |
 | `qrcode.js` | QR code generator (MIT, Kazuhiko Arase) |
 | `figure.js` | The low-poly body figure used for muscle maps |
 | `muscles.js` | Which muscles each exercise works, weekly targets and body-map shapes |

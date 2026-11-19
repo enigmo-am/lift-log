@@ -7,6 +7,9 @@
   --good: #15803d; --warn: #b45309;
   --flame: #ea580c;
 }
+@font-face { font-family: "Outfit"; font-weight: 600; font-display: swap; src: url(fonts/outfit-latin-600-normal.woff2) format("woff2"); }
+@font-face { font-family: "Outfit"; font-weight: 700; font-display: swap; src: url(fonts/outfit-latin-700-normal.woff2) format("woff2"); }
+@font-face { font-family: "Outfit"; font-weight: 800; font-display: swap; src: url(fonts/outfit-latin-800-normal.woff2) format("woff2"); }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--ink);
   font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
@@ -408,3 +411,53 @@ body.ob-open { overflow: hidden; } body.ob-open .tabs, body.ob-open .topbar { vi
 .ob-range { width: 100%; accent-color: var(--accent); }
 .ob-card { margin: 18px 0 12px; }
 .ob-inner > .btn.ghost.small { border: 0; background: none; color: var(--accent); align-self: center; text-decoration: underline; text-underline-offset: 3px; }
+
+/* ===== v7: charts ===== */
+.chart .grid.dash { stroke-dasharray: 2 4; }
+.chart .glowline { stroke-width: 2.5; filter: drop-shadow(0 3px 5px color-mix(in srgb, var(--accent) 35%, transparent)); }
+.chart .area-in { animation: fadeUp .7s ease-out; }
+.chart .endpt { fill: var(--accent); stroke: var(--card); stroke-width: 3; }
+.chart .endlbl rect { fill: var(--accent); } .chart .endlbl text { fill: var(--accent-ink); font-size: 11px; font-weight: 700; }
+.chart .peak circle { fill: var(--card); stroke: var(--ink2); stroke-width: 1.5; } .chart .peak text { fill: var(--ink2); font-size: 10px; font-weight: 600; }
+.chart .hoverpt { fill: var(--card); stroke: var(--accent); stroke-width: 2.5; }
+.chart .bar-bg { fill: var(--s0); opacity: .6; }
+.chart .bar2 { opacity: .78; transform-box: fill-box; transform-origin: bottom; animation: grow .6s cubic-bezier(.3,.7,.3,1) backwards; } .chart .bar2.hl { opacity: 1; }
+.chart .bval { fill: var(--ink2); font-size: 10.5px; font-weight: 700; }
+.chart .target-line { stroke: var(--ink2); stroke-width: 1.2; stroke-dasharray: 5 4; } .chart .tlbl { fill: var(--ink2); font-size: 10px; font-weight: 600; }
+.clock { max-width: 300px; margin: 0 auto; }
+.clock .clock-ring { fill: none; stroke: var(--line); stroke-dasharray: 2 4; }
+.clock .petal-bg { fill: var(--s0); opacity: .5; } .clock .petal { fill: var(--accent); opacity: .7; transform-origin: 140px 140px; animation: bloom .8s cubic-bezier(.3,.7,.3,1) backwards; }
+.clock .petal.hl { opacity: 1; } .clock .clock-big { fill: var(--ink); font-size: 22px; font-weight: 800; font-family: "Outfit", inherit; }
+@keyframes grow { from { transform: scaleY(0); } } @keyframes bloom { from { transform: scale(.4); opacity: 0; } } @keyframes fadeUp { from { opacity: 0; } }
+.dist2 { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+.drow { display: flex; align-items: center; gap: 10px; } .dic { width: 34px; height: 34px; border-radius: 10px; background: var(--s0); display: grid; place-items: center; font-size: 17px; flex: none; }
+.dbody { flex: 1; min-width: 0; } .dtop { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; } .dtop span { color: var(--muted); font-variant-numeric: tabular-nums; }
+.dtrack { height: 8px; background: var(--s0); border-radius: 99px; overflow: hidden; }
+.dtrack i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--s3), var(--accent)); transform-origin: left; animation: growX .7s cubic-bezier(.3,.7,.3,1) backwards; }
+@keyframes growX { from { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* ===== v7: type + onboarding art ===== */
+h1, h2, .hello, .big, .num, .tag-name, .mname, .kpi b, .ptile b, .tile .num, .stat .num, .bwk, .clock-big, .ob-choice b, .goal, .lvl, .streak-badge {
+  font-family: "Outfit", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; letter-spacing: -.005em; }
+h2 { font-weight: 700; } .topbar h1 { font-weight: 800; letter-spacing: -.01em; }
+.ob-art { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+.onboard .ob-inner { z-index: 1; }
+.blob { position: absolute; border-radius: 50%; filter: blur(48px); opacity: .45; animation: drift 18s ease-in-out infinite alternate; }
+.blob.b1 { width: 260px; height: 260px; background: var(--accent); top: -80px; right: -70px; }
+.blob.b2 { width: 220px; height: 220px; background: var(--s2); bottom: -60px; left: -80px; animation-duration: 22s; }
+.blob.b3 { width: 160px; height: 160px; background: var(--s3); top: 45%; right: -90px; opacity: .25; animation-duration: 26s; }
+[data-mode="dark"] .blob { opacity: .28; } [data-mode="dark"] .blob.b3 { opacity: .16; }
+.ob-art:not(.welcome) .blob.b1 { width: 200px; height: 200px; opacity: .3; } .ob-art:not(.welcome) .blob.b2 { opacity: .22; }
+.dots { position: absolute; inset: 0; background-image: radial-gradient(var(--ink) 1px, transparent 1.2px); background-size: 22px 22px; opacity: .05;
+  -webkit-mask-image: linear-gradient(to bottom, #000, transparent 55%); mask-image: linear-gradient(to bottom, #000, transparent 55%); }
+@keyframes drift { to { transform: translate(-30px, 40px) scale(1.12); } }
+.ob-orbit { position: relative; width: 210px; height: 210px; margin: 0 auto; display: grid; place-items: center; }
+.ob-orbit .ob-logo { position: relative; z-index: 1; }
+.orb { position: absolute; left: 50%; top: 50%; width: 38px; height: 38px; margin: -19px; border-radius: 50%; box-shadow: 0 4px 12px rgba(0,0,0,.12);
+  transform: rotate(var(--a)) translate(98px) rotate(calc(-1 * var(--a))); animation: bob 4.5s ease-in-out var(--d) infinite; opacity: .92; }
+.orb:nth-child(even) { width: 30px; height: 30px; margin: -15px; opacity: .75; }
+@keyframes bob { 50% { transform: rotate(var(--a)) translate(104px) rotate(calc(-1 * var(--a))); } }
+.ob-hero { margin: 4vh 0 26px; } .ob-hero h1 { font-size: 40px; font-weight: 800; margin-top: 10px; }
+.ob-hero p { font-size: 15px; }
+.onboard h2 { font-size: 30px; font-weight: 800; }

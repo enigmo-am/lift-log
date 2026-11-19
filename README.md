@@ -24,6 +24,11 @@ A free, offline workout logger that runs in your phone's browser. No account, no
 - **Welcome flow:** on first launch, choose Google (synced) or This device (local), then a skippable 4-step setup: name and avatar, look, goal, and friends. You can also restore a backup or import from another app right away.
 - **Starts empty:** new users pick a template (Push/Pull/Legs, Upper/Lower, Full body) or build their own routines.
 - **Exercise library:** 130 built-in exercises with muscle tags. A new exercise name gets tagged by tapping muscles on the body figure, once for a main muscle and twice for a helper. You can edit any exercise's muscles in Profile → Exercise library.
+- **How muscle work is counted:** each hard set counts as 1 for the main muscle and ½ for helper muscles (the method most training research and apps use). Warm-up sets under 50% of that day's top weight are skipped.
+- **Strength levels:** your best estimated 1-rep max divided by your bodyweight, rated against approximate public standards (Beginner → Elite) for men or women. This is what makes a curl and a squat comparable.
+- **Bodyweight mode:** for exercises like pull-ups, dips and sit-ups, your latest bodyweight is counted plus any added weight, so a "+5" means bodyweight + 5 kg.
+- **Smart inputs:** suggestions appear as you type an exercise name (handles partial words and small typos), and each exercise shows today's target (double progression).
+- **Reminders:** a calendar file with routine-day and streak alarms, in-app notifications, best-effort background notifications on installed Android apps, and a streak-at-risk banner after noon.
 - **Themes:** 8 eye-friendly colour themes (Classic, Ocean, Forest, Sunset, Lavender, Sakura, Sand, Graphite), light, dark or auto mode, and Solid, Tinted or Glow backgrounds. There's a quick 🌙/☀️ toggle in the top bar.
 - **Backup status chip** in the top bar: 💾 shows how long since your last backup, and ☁️ shows sync status. Tap it for exact timestamps and a **Back up now** button.
 - **Import data** from Arrow (JSON), Strong (CSV), Hevy (CSV), any spreadsheet (CSV with date, exercise, weight, reps) or another Lift Log backup. The file type is detected automatically.

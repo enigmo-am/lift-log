@@ -40,6 +40,7 @@ function save() {
   S.updatedAt = Date.now();
   try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast("Couldn't save. Storage is full or blocked."); }
   if (typeof Sync !== "undefined") Sync.schedule();
+  clearTimeout(save._r); save._r = setTimeout(() => { if (typeof setupBackgroundReminders === "function") setupBackgroundReminders(); }, 1500);
 }
 
 // ---------- helpers ----------
@@ -59,9 +60,15 @@ const isBW = (name) => BODYWEIGHT.test(name);
 const isUni = (name) => (name in S.uni ? S.uni[name] : UNILATERAL.test(name));
 const restFor = (name) => (COMPOUND.test(name) ? +S.profile.restCompound || 120 : +S.profile.restIsolation || 75);
 const e1rm = (w, r) => (w > 0 && r > 0 ? w * (1 + Math.min(r, 12) / 30) : 0);
-const setVol = (s) => (s.w || 0) * (s.r || 0) * (s.u ? 2 : 1);
+const setLoad = (s) => (s.b ? s.b + (s.w || 0) : s.w || 0);          // bodyweight sets: bodyweight + added weight
+const setVol = (s) => setLoad(s) * (s.r || 0) * (s.u ? 2 : 1);
+const latestBW = () => { const w = [...(S.weights || [])].sort((a, b) => a.date.localeCompare(b.date)).at(-1); return w ? +w.kg : 0; };
+const bwMode = (name) => (S.bwPref && name in S.bwPref ? S.bwPref[name] : isBW(name));
 const mmss = (sec) => `${Math.floor(sec / 60)}:${pad(Math.floor(sec % 60))}`;
-function fmtSet(name, s) { const base = isBW(name) && !s.w ? `${s.r}` : `${round1(s.w)}×${s.r}`; return s.u ? base + "/side" : base; }
+function fmtSet(name, s) {
+  const base = s.b ? `BW${s.w ? "+" + round1(s.w) : ""}×${s.r}` : isBW(name) && !s.w ? `${s.r}` : `${round1(s.w)}×${s.r}`;
+  return s.u ? base + "/side" : base;
+}
 function fmtKg(v) { return v >= 10000 ? (v / 1000).toFixed(1) + "t" : Math.round(v).toLocaleString() + " kg"; }
 function toast(msg) {
   const t = $("#toast"); t.textContent = msg; t.hidden = false;
@@ -83,7 +90,7 @@ function sessionsByExercise() {
       const topSet = sets.filter((s) => (s.w || 0) === top).sort((a, b) => b.r - a.r)[0];
       (map[ex] ||= []).push({
         date: w.date, sets, top, topReps: topSet.r,
-        e1rm: Math.max(...sets.map((s) => e1rm(s.w, s.r))),
+        e1rm: Math.max(...sets.map((s) => e1rm(setLoad(s), s.r))),
         volume: sets.reduce((a, s) => a + setVol(s), 0),
         reps: Math.max(...sets.map((s) => s.r || 0)),
         totalReps: sets.reduce((a, s) => a + (s.r || 0), 0),
@@ -111,17 +118,39 @@ function streaks() {
   return { cur, best, loggedToday: days.has(today()) };
 }
 function muscleSets(fromDate, toDate) {
+  // Counts "hard sets": a set counts once per main muscle and half per helper muscle.
+  // Light warm-up sets (under 50% of that exercise's heaviest set that day) are left out.
   const out = Object.fromEntries(Object.keys(MUSCLES).map((k) => [k, 0]));
   for (const w of S.workouts) {
     if (w.date < fromDate || w.date > toDate) continue;
+    const top = {};
+    for (const s of w.sets || []) top[s.ex] = Math.max(top[s.ex] || 0, setLoad(s));
     for (const s of w.sets || []) {
       if (!s.r && !s.w) continue;
+      if (top[s.ex] > 0 && setLoad(s) < 0.5 * top[s.ex]) continue;
       const m = musclesFor(s.ex);
       m.p.forEach((k) => (out[k] += 1));
       m.s.forEach((k) => (out[k] += 0.5));
     }
   }
   return out;
+}
+// Strength level vs bodyweight, using approximate public standards (see muscles.js).
+function strengthLevel(ex) {
+  const std = STANDARDS[ex], list = sessionsByExercise()[ex];
+  if (!std || !list) return null;
+  const sex = S.profile.sex === "f" ? "f" : "m";
+  if (std.reps) {
+    const best = Math.max(...list.map((x) => x.reps)), th = std.reps[sex];
+    const lvl = th.filter((t) => best >= t).length;
+    return { ex, lvl, value: best, unit: "reps", next: th[lvl] != null ? `${th[lvl]} reps` : null, frac: lvl >= 4 ? 1 : (lvl + Math.min(1, best / th[lvl] - (lvl ? th[lvl - 1] / th[lvl] : 0))) / 4 };
+  }
+  const bw = latestBW(); if (!bw) return { ex, needBW: true };
+  const best = Math.max(...list.map((x) => x.e1rm)), ratio = best / bw, th = std[sex];
+  const lvl = th.filter((t) => ratio >= t).length;
+  const lo = lvl ? th[lvl - 1] : 0, hi = th[lvl] ?? th[3] * 1.25;
+  return { ex, lvl, value: round1(best), ratio: Math.round(ratio * 100) / 100, unit: "kg", next: th[lvl] != null ? `${round1(th[lvl] * bw)} kg` : null,
+    frac: Math.min(1, (lvl + Math.max(0, Math.min(1, (ratio - lo) / (hi - lo)))) / 4) };
 }
 function allPRs() {
   // every session where an exercise beat its previous best
@@ -429,6 +458,7 @@ function renderHome() {
   ${dogtagHTML(myCardData())}
   <div class="xp-row"><span class="lvl">Lv ${lv.lvl}</span><div class="xp"><div style="width:${Math.round(lv.pct * 100)}%"></div></div>
     <span class="small muted">${lv.toNext.toLocaleString()} XP to go</span></div>
+  ${streakBanner()}
 
   <div class="card">
     <div class="row"><div><div class="big">🔥 ${st.cur}</div><div class="small muted">day streak · best ${st.best}</div></div><span class="spacer"></span>
@@ -507,7 +537,7 @@ function newDraft(routine) {
     exercises: (routine ? routine.exercises : []).map((ex) => {
       const last = lastSession(ex);
       const n = last ? Math.max(3, Math.min(last.sets.length, 5)) : 3;
-      return { ex, uni: isUni(ex), sets: Array.from({ length: n }, () => ({ w: "", r: "", done: false })) };
+      return { ex, uni: isUni(ex), bw: bwMode(ex), sets: Array.from({ length: n }, () => ({ w: "", r: "", done: false })) };
     }),
   };
 }
@@ -521,13 +551,17 @@ function renderLogger() {
       <span class="spacer"></span><input type="date" id="draftDate" value="${D.date}" style="width:auto"></div>
       <div class="xp" style="margin-top:10px"><div style="width:${allCount ? (doneCount / allCount) * 100 : 0}%"></div></div></div>`;
   D.exercises.forEach((e, ei) => {
-    const last = lastSession(e.ex), bw = isBW(e.ex);
+    const last = lastSession(e.ex); if (e.bw == null) e.bw = bwMode(e.ex); const bw = e.bw;
+    const tgt = nextTarget(e.ex);
     html += `<div class="card ex" data-ei="${ei}">
       <div class="ex-head"><span class="ex-name">${esc(e.ex)}</span><span class="spacer"></span>
+        <button class="chip-btn ${e.bw ? "on" : ""}" data-act="bw" title="Count your bodyweight (from Profile) plus any added weight">Bodyweight</button>
         <button class="chip-btn ${e.uni ? "on" : ""}" data-act="uni" title="Log reps per side">Per side</button>
         <button class="btn ghost small" data-act="rmex" aria-label="Remove exercise">✕</button></div>
       <div class="last">${last ? `Last (${fmtShort(last.date)}): ${last.sets.map((s) => fmtSet(e.ex, s)).join(", ")}` : "First time, no history yet"} · rest ${mmss(restFor(e.ex))}</div>
-      <div class="set-head"><span>Set</span><span>${bw ? "+kg" : "kg"}</span><span>${e.uni ? "Reps/side" : "Reps"}</span><span>Done</span><span></span></div>
+      ${tgt ? `<div class="target-hint">🎯 Today's target: <b>${tgt.text}</b> <span class="muted">${tgt.why}</span></div>` : ""}
+      ${bw ? `<div class="small muted" style="margin:-2px 0 6px">${latestBW() ? `Counting your bodyweight (${latestBW()} kg) + any added weight` : `⚠️ Add your bodyweight in Profile so it counts towards volume`}</div>` : ""}
+      <div class="set-head"><span>Set</span><span>${bw ? "+kg added" : "kg"}</span><span>${e.uni ? "Reps/side" : "Reps"}</span><span>Done</span><span></span></div>
       ${e.sets.map((s, si) => {
         const ls = last && last.sets[Math.min(si, last.sets.length - 1)];
         return `<div class="set ${s.done ? "done" : ""}" data-si="${si}"><span class="n">${si + 1}</span>
@@ -540,8 +574,7 @@ function renderLogger() {
     </div>`;
   });
   html += `<div class="card"><div class="row">
-      <input type="text" id="addExName" list="exList" placeholder="Add exercise…"><button class="btn" id="addExBtn">Add</button></div>
-    <datalist id="exList">${allExerciseNames().map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
+      <div class="suggest-wrap" style="flex:1"><input type="text" id="addExName" placeholder="Add exercise… (start typing)" autocomplete="off"></div><button class="btn" id="addExBtn">Add</button></div>
     <p class="small muted">Tap ✓ when you finish a set. It fills in last time's numbers if you left them empty and starts your rest timer.</p>
     <div class="row"><button class="btn primary" id="finishBtn" style="flex:1">Finish workout</button><button class="btn danger" id="discardBtn">Discard</button></div></div>`;
   $("#view").innerHTML = html;
@@ -557,6 +590,7 @@ function renderLogger() {
     if (act === "rmset") ex.sets.splice(+e.currentTarget.closest(".set").dataset.si, 1);
     if (act === "rmex") { if (!confirm(`Remove ${ex.ex}?`)) return; D.exercises.splice(ei, 1); }
     if (act === "uni") { ex.uni = !ex.uni; S.uni[ex.ex] = ex.uni; }
+    if (act === "bw") { ex.bw = !ex.bw; S.bwPref = { ...(S.bwPref || {}), [ex.ex]: ex.bw }; }
     if (act === "done") {
       const si = +e.currentTarget.closest(".set").dataset.si, s = ex.sets[si];
       if (!s.done) {
@@ -569,8 +603,9 @@ function renderLogger() {
     }
     save(); renderLogger();
   }));
+  attachSuggest($("#addExName"), (n) => { $("#addExName").value = n; $("#addExBtn").click(); });
   $("#addExBtn").onclick = () => {
-    const n = $("#addExName").value.trim(); if (!n) return;
+    const n = canonicalName($("#addExName").value.trim()); if (!n) return;
     D.exercises.push({ ex: n, uni: isUni(n), sets: [0, 1, 2].map(() => ({ w: "", r: "", done: false })) }); save(); renderLogger();
     ensureTagged(n);
   };
@@ -592,7 +627,7 @@ function finishWorkout() {
       const r = num(s.r); if (!r) return;
       let w = num(s.w);
       if (w == null) { const ls = last && last.sets[Math.min(si, last.sets.length - 1)]; w = ls ? ls.w : 0; }
-      const o = { ex: e.ex, w, r }; if (e.uni) o.u = 1; sets.push(o);
+      const o = { ex: e.ex, w, r }; if (e.uni) o.u = 1; if (e.bw && latestBW()) o.b = latestBW(); sets.push(o);
     });
   });
   if (!sets.length) { toast("Add reps to at least one set first"); return; }
@@ -609,7 +644,99 @@ function finishWorkout() {
     if (latest && sc(latest) > Math.max(...old.map(sc))) prs++;
   }
   toast(prs ? `Workout saved. ${prs} new PR${prs > 1 ? "s" : ""}! 🏆` : "Workout saved 💪");
+  if (prs) confetti();
   render();
+}
+
+// ---------- exercise search suggestions ----------
+function useCounts() { const c = {}; S.workouts.forEach((w) => (w.sets || []).forEach((s) => (c[s.ex] = (c[s.ex] || 0) + 1))); return c; }
+// Scores how well a typed query matches a name: every typed word must match the start of a word in the name.
+function matchScore(name, q) {
+  const n = name.toLowerCase(), qq = q.toLowerCase().trim(); if (!qq) return 0;
+  const words = n.split(/[\s()\-\/]+/).filter(Boolean), toks = qq.split(/\s+/);
+  let sc = 0;
+  for (const t of toks) {
+    if (words.some((w) => w.startsWith(t))) sc += 3;
+    else if (n.includes(t)) sc += 1;
+    else if (t.length >= 4 && words.some((w) => editClose(w.slice(0, t.length), t))) sc += 1; // small typo
+    else return -1;
+  }
+  if (n.startsWith(qq)) sc += 4;
+  return sc;
+}
+function editClose(a, b) { // at most one wrong/missing/swapped letter
+  if (Math.abs(a.length - b.length) > 1) return false;
+  if (a.length === b.length) { const d = [...a].map((c, i) => (c !== b[i] ? i : -1)).filter((i) => i >= 0);
+    if (d.length === 2 && d[1] === d[0] + 1 && a[d[0]] === b[d[1]] && a[d[1]] === b[d[0]]) return true; }
+  let i = 0, j = 0, e = 0;
+  while (i < a.length && j < b.length) { if (a[i] === b[j]) { i++; j++; continue; } if (++e > 1) return false;
+    if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; } }
+  return e + (a.length - i) + (b.length - j) <= 1;
+}
+function searchExercises(q, limit = 8) {
+  const uc = useCounts();
+  return allExerciseNames().map((n) => [n, matchScore(n, q)]).filter(([, sc]) => sc > 0)
+    .map(([n, sc]) => [n, sc + Math.min(2, (uc[n] || 0) / 15)]).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, limit).map(([n]) => n);
+}
+function canonicalName(v) { // reuse the library's spelling if the user typed a known name in different case
+  if (!v) return v; const hit = allExerciseNames().find((n) => n.toLowerCase() === v.toLowerCase());
+  return hit || v.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+function attachSuggest(input, onPick) {
+  const wrap = input.closest(".suggest-wrap") || input.parentElement;
+  let box = document.createElement("div"); box.className = "suggest"; box.hidden = true; wrap.appendChild(box);
+  let items = [], idx = -1;
+  const draw = () => {
+    const q = input.value.trim();
+    if (!q) { box.hidden = true; return; }
+    items = searchExercises(q);
+    const exact = items.some((n) => n.toLowerCase() === q.toLowerCase());
+    box.innerHTML = items.map((n, i) => { const m = musclesFor(n);
+      return `<button type="button" class="sg ${i === idx ? "on" : ""}" data-i="${i}"><b>${hl(n, q)}</b><small>${m.p.map((k) => MUSCLES[k]).join(", ")}</small></button>`; }).join("")
+      + (exact ? "" : `<button type="button" class="sg new" data-new="1">＋ Add "<b>${esc(q)}</b>" as a new exercise</button>`);
+    box.hidden = false;
+    const rect = input.getBoundingClientRect(); box.classList.toggle("up", rect.top > innerHeight * 0.55);
+    $$(".sg", box).forEach((b) => b.addEventListener("pointerdown", (e) => { e.preventDefault(); pick(b.dataset.new ? canonicalName(q) : items[+b.dataset.i]); }));
+  };
+  const pick = (n) => { box.hidden = true; idx = -1; onPick(n); };
+  input.addEventListener("input", () => { idx = -1; draw(); });
+  input.addEventListener("focus", draw);
+  input.addEventListener("blur", () => setTimeout(() => (box.hidden = true), 150));
+  input.addEventListener("keydown", (e) => {
+    if (box.hidden) return;
+    if (e.key === "ArrowDown") { idx = Math.min(items.length - 1, idx + 1); draw(); e.preventDefault(); }
+    if (e.key === "ArrowUp") { idx = Math.max(-1, idx - 1); draw(); e.preventDefault(); }
+    if (e.key === "Enter" && idx >= 0) { e.preventDefault(); e.stopImmediatePropagation(); pick(items[idx]); }
+  });
+}
+function hl(name, q) { // bold the typed parts
+  let out = esc(name);
+  q.trim().split(/\s+/).filter((t) => t.length > 0).forEach((t) => { out = out.replace(new RegExp(`(^|\\s|\\()(${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "ig"), "$1<u>$2</u>"); });
+  return out;
+}
+
+// ---------- progressive overload hint ----------
+// Double progression: hit the top of the rep range on every set → add weight; otherwise add a rep.
+function nextTarget(ex) {
+  const l = lastSession(ex); if (!l) return null;
+  if (isBW(ex) && !l.sets.some((s) => s.w)) { const r = l.reps; return { text: `${r + 1} reps`, why: "one more than your best last time" }; }
+  const big = COMPOUND.test(ex), topR = big ? 8 : 12, lowR = big ? 5 : 8;
+  const atTop = l.sets.filter((s) => (s.w || 0) === l.top);
+  const allHit = atTop.length >= Math.min(3, l.sets.length) && atTop.every((s) => s.r >= topR);
+  const inc = /barbell|squat|deadlift|leg press|machine|smith/i.test(ex) ? 2.5 : /dumbbell/i.test(ex) ? 2 : 2.5;
+  if (allHit) return { text: `${round1(l.top + inc)} kg × ${lowR}+`, why: `you hit ${topR}+ reps on every set` };
+  const minR = Math.min(...atTop.map((s) => s.r));
+  if (minR < lowR - 1 && l.sets.length > 1) return { text: `${round1(l.top)} kg × ${lowR}`, why: "build reps back up at this weight" };
+  return { text: `${round1(l.top)} kg × ${Math.min(topR, minR + 1)}`, why: `beat last time by a rep (aim for ${topR})` };
+}
+
+// ---------- confetti for PRs ----------
+function confetti() {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const c = document.createElement("div"); c.className = "confetti";
+  const cols = ["var(--accent)", "var(--s3)", "var(--flame)", "var(--good)", "#facc15"];
+  c.innerHTML = Array.from({ length: 70 }, (_, i) => `<i style="left:${Math.random() * 100}%;background:${cols[i % 5]};animation-delay:${Math.random() * 0.4}s;animation-duration:${1.6 + Math.random() * 1.2}s;transform:rotate(${Math.random() * 360}deg)"></i>`).join("");
+  document.body.appendChild(c); setTimeout(() => c.remove(), 3500);
 }
 
 // ---------- REST TIMER ----------
@@ -743,6 +870,7 @@ function renderProgress() {
       <div class="pl"><span>Best est. 1RM</span><b>${round1(strong.e1rm)} kg</b></div>`}
       <div class="pl"><span>Most reps in a set</span><b>${most.reps}</b></div>
       ${bw ? "" : `<div class="pl"><span>Biggest session</span><b>${fmtKg(bigv.volume)}</b></div>`}
+      ${(() => { const L = strengthLevel(progEx); return L && !L.needBW ? `<div class="pl"><span>Strength level</span><b><span class="lvchip l${L.lvl}">${LEVELS[L.lvl]}</span></b></div>` : ""; })()}
       <div class="pl"><span>Sessions</span><b>${list.length}</b></div>
       <div class="pl"><span>Total sets</span><b>${list.reduce((a, x) => a + x.sets.length, 0)}</b></div>
       <div class="small muted" style="margin-top:6px">Works: ${[...m.p.map((k) => MUSCLES[k]), ...m.s.map((k) => MUSCLES[k].toLowerCase())].join(", ") || "not mapped yet"} · <a href="#" id="editMus">edit</a></div>
@@ -899,6 +1027,20 @@ function hideTip() { const t = $("#tooltip"); if (t) t.hidden = true; }
 document.addEventListener("pointerdown", (e) => { if (!e.target.closest(".chart, .figure, .cal")) hideTip(); });
 
 // ---------- STATS ----------
+function levelBar(L) {
+  return `<div class="lvbar">${LEVELS.map((n, i) => `<i class="${i < L.lvl ? "done" : i === L.lvl ? "cur" : ""}"></i>`).join("")}<span class="lvmark" style="left:${L.frac * 100}%"></span></div>`;
+}
+function strengthCard() {
+  const rows = Object.keys(STANDARDS).map(strengthLevel).filter(Boolean);
+  if (!rows.length) return "";
+  const need = rows.some((r) => r.needBW);
+  const ok = rows.filter((r) => !r.needBW).sort((a, b) => b.frac - a.frac);
+  return `<div class="card"><div class="row"><h2 style="margin:0">Strength levels</h2><span class="spacer"></span><span class="small muted">vs bodyweight</span></div>
+    <p class="small muted" style="margin:2px 0 8px">Your best estimated 1-rep max compared with ${S.profile.sex === "f" ? "women's" : "men's"} standards for your bodyweight. This is how strength is compared fairly across different muscles.</p>
+    ${ok.map((r) => `<div class="lvrow"><div class="lvtop"><b>${esc(r.ex)}</b><span class="lvchip l${r.lvl}">${LEVELS[r.lvl]}</span></div>${levelBar(r)}
+      <div class="small muted">${r.unit === "reps" ? `Best: ${r.value} reps` : `Est. 1RM ${r.value} kg · ${r.ratio}× bodyweight`}${r.next ? ` · next level at ${r.next}` : " · top level 🏆"}</div></div>`).join("")}
+    ${need ? `<p class="small warn-txt">Add your bodyweight (Profile → Bodyweight) to see levels for weighted lifts.</p>` : ""}</div>`;
+}
 let selMuscle = null;
 function ringSVG(frac, size, stroke, label, cls = "") {
   const r = (size - stroke) / 2, c = 2 * Math.PI * r, f = Math.max(0, Math.min(1, frac));
@@ -972,8 +1114,9 @@ function renderStats() {
     <div class="legend"><span><i class="sw l0"></i>none</span><span><i class="sw l2"></i>&lt;50%</span><span><i class="sw l3"></i>50–75%</span><span><i class="sw l4"></i>75–99%</span><span><i class="sw l5"></i>target hit</span></div>
     <div class="ring-groups">${Object.entries(GROUPS).map(([g, ks]) => `<div class="rg"><div class="rg-h">${g}</div><div class="rg-row">${ks.map((k) =>
       `<button class="rchip ${k === selMuscle ? "sel" : ""}" data-sel="${k}">${ringSVG(ms[k] / tgt(k), 52, 6, round1(ms[k]))}<span>${MUSCLES[k]}</span></button>`).join("")}</div></div>`).join("")}</div>
-    <p class="small muted">Ring = sets vs ${plabel === "4 weeks" ? "4-week" : "weekly"} target, number = sets done. Tap a ring or a muscle on the body for details. Main muscle = 1 set, helper = ½.</p>
+    <p class="small muted">Ring = sets vs ${plabel === "4 weeks" ? "4-week" : "weekly"} target, number = sets done. Tap a ring or a muscle on the body for details. Main muscle = 1 set, helper = ½. Warm-up sets (under half your top weight) don't count.</p>
   </div>
+  ${strengthCard()}
   <div class="card"><h2>Muscle balance</h2><p class="small muted" style="margin-top:-4px">Last 4 weeks vs target. The dashed line is 100%, so a lopsided shape means some groups are getting more than others.</p><div id="radar"></div></div>
   <div class="card"><h2>Where your sets go</h2><p class="small muted" style="margin-top:-4px">Share of all sets, last 4 weeks</p>
     <div class="dist2">${(() => { const arr = Object.keys(GROUPS).map((g) => [g, groupSum(g, m4) / totalSets4, groupSum(g, m4)]).sort((a, b) => b[1] - a[1]); const mx = arr[0][1] || 1;
@@ -1102,12 +1245,13 @@ function sheetLibrary() {
     <div class="lib-list"></div>`, (sh) => {
     const draw = () => {
       const q = $("#libQ", sh).value.toLowerCase();
-      $(".lib-list", sh).innerHTML = names.filter((n) => n.toLowerCase().includes(q)).slice(0, 200).map((n) => { const m = musclesFor(n);
+      const list = q ? searchExercises(q, 200) : names;
+      $(".lib-list", sh).innerHTML = list.slice(0, 200).map((n) => { const m = musclesFor(n);
         return `<button class="lib-row" data-n="${esc(n)}"><div><b>${esc(n)}</b><small>${m.p.map((k) => MUSCLES[k]).join(", ") || "⚠️ not tagged"}${customMuscles()[n] ? " · custom" : ""}</small></div><span class="chev">›</span></button>`; }).join("");
       $$("[data-n]", sh).forEach((b) => (b.onclick = () => tagExercise(b.dataset.n, sheetLibrary)));
     };
     $("#libQ", sh).oninput = draw; draw();
-    $("#libNew", sh).onclick = () => { const n = ($("#libQ", sh).value || prompt("Exercise name:") || "").trim(); if (n) tagExercise(n.replace(/\b\w/g, (c) => c.toUpperCase()), sheetLibrary); };
+    $("#libNew", sh).onclick = () => { const n = ($("#libQ", sh).value || prompt("Exercise name:") || "").trim(); if (n) tagExercise(canonicalName(n), sheetLibrary); };
   });
 }
 
@@ -1125,29 +1269,32 @@ function backupAgo() {
 function renderProfile() {
   const p = S.profile, earned = earnedBadges(), show = showcaseBadges(), lv = levelInfo(), a = S.appearance;
   const w = [...S.weights].sort((x, y) => x.date.localeCompare(y.date));
-  const tiles = [
-    ["edit", "✏️", "Edit profile", esc(p.name || "Add your name"), ""],
-    ["look", "🎨", "Appearance", `${THEMES[a.theme]?.name || "Classic"} · ${a.mode === "system" ? "auto" : a.mode}`, `<div class="tile-sw" style="background:${themePreview(a.theme, document.documentElement.dataset.mode)}"></div>`],
-    ["bw", "⚖️", "Bodyweight", w.length ? `${w.at(-1).kg} kg` : "Not logged yet", sparkline(w.slice(-12).map((x) => x.kg))],
-    ["badges", "🏅", "Badges", `${earned.length} of ${BADGES.length}`, `<div class="mini-bar"><div style="width:${(earned.length / BADGES.length) * 100}%"></div></div>`],
-    ["routines", "📋", "Routines", `${S.routines.length} routines`, `<div class="day-dots">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<i class="${S.routines.some((r) => r.day === d) ? "on" : ""}">${DAYS[d][0]}</i>`).join("")}</div>`],
-    ["data", Sync.on() ? "☁️" : "💾", "Data & backup", Sync.on() ? `Drive · synced ${S.sync.lastSync ? timeAgo(S.sync.lastSync) : "never"}` : `On device · backup ${backupAgo()}`, ""],
-    ["library", "🏋️", "Exercise library", `${Object.keys(EXERCISE_MUSCLES).length + Object.keys(customMuscles()).filter((n) => !EXERCISE_MUSCLES[n]).length} exercises`, ""],
-    ["import", "📥", "Import data", "Arrow, Strong, Hevy, CSV", ""],
-    ["install", "📲", "Install app", isStandalone() ? "Installed ✓" : "Add to home screen", ""],
-  ];
+  const R = S.reminders || {};
+  const T = {
+    edit: ["✏️", "Edit profile", esc(p.name || "Add your name"), ""],
+    bw: ["⚖️", "Bodyweight", w.length ? `${w.at(-1).kg} kg` : "Not logged yet", sparkline(w.slice(-12).map((x) => x.kg))],
+    badges: ["🏅", "Badges", `${earned.length} of ${BADGES.length}`, `<div class="mini-bar"><div style="width:${(earned.length / BADGES.length) * 100}%"></div></div>`],
+    routines: ["📋", "Routines", `${S.routines.length} routine${S.routines.length === 1 ? "" : "s"}`, `<div class="day-dots">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<i class="${S.routines.some((r) => r.day === d) ? "on" : ""}">${DAYS[d][0]}</i>`).join("")}</div>`],
+    library: ["🏋️", "Exercise library", `${Object.keys(EXERCISE_MUSCLES).length + Object.keys(customMuscles()).filter((n) => !EXERCISE_MUSCLES[n]).length} exercises`, ""],
+    remind: ["🔔", "Reminders", R.on ? `Workout ${R.workout || "18:00"} · streak ${R.streak || "20:00"}` : "Off", ""],
+    look: ["🎨", "Appearance", `${THEMES[a.theme]?.name || "Classic"} · ${a.mode === "system" ? "auto" : a.mode}`, `<div class="tile-sw" style="background:${themePreview(a.theme, document.documentElement.dataset.mode)}"></div>`],
+    install: ["📲", "Install app", isStandalone() ? "Installed ✓" : "Add to home screen", ""],
+    data: [Sync.on() ? "☁️" : "💾", "Data & backup", Sync.on() ? `Drive · synced ${S.sync.lastSync ? timeAgo(S.sync.lastSync) : "never"}` : `On device · backup ${backupAgo()}`, ""],
+    import: ["📥", "Import data", "Arrow, Strong, Hevy, CSV", ""],
+  };
+  const sections = [["You", ["edit", "bw", "badges"]], ["Training", ["routines", "library", "remind"]], ["App", ["look", "install"]], ["Your data", ["data", "import"]]];
+  const tileHTML = (id) => { const [icon, title, sub, extra] = T[id]; return `<button class="ptile" data-sheet="${id}"><span class="ptile-ic">${icon}</span><b>${title}</b><span class="ptile-sub">${sub}</span>${extra}</button>`; };
   $("#view").innerHTML = `
     <div class="profile-top">${dogtagHTML(myCardData())}</div>
     <div class="xp-row"><span class="lvl">Lv ${lv.lvl}</span><div class="xp"><div style="width:${Math.round(lv.pct * 100)}%"></div></div><span class="small muted">${lv.xp.toLocaleString()} XP</span></div>
     <div class="card"><div class="row"><h2 style="margin:0">Showcase</h2><span class="spacer"></span><button class="btn small" id="editShow">Edit</button></div>
       <div class="showcase">${[0, 1, 2].map((i) => show[i] ? `<div class="badge on big"><span>${show[i].icon}</span><small>${esc(show[i].name)}</small><em>${esc(show[i].desc)}</em></div>` : `<div class="badge empty"><span>＋</span><small>Empty</small></div>`).join("")}</div></div>
-    <div class="tile-grid">${tiles.map(([id, icon, title, sub, extra]) => `<button class="ptile" data-sheet="${id}">
-      <span class="ptile-ic">${icon}</span><b>${title}</b><span class="ptile-sub">${sub}</span>${extra}</button>`).join("")}</div>
+    ${sections.map(([name, ids]) => `<div class="psec"><div class="psec-h">${name}</div><div class="tile-grid ${ids.length === 3 ? "three" : ""}">${ids.map(tileHTML).join("")}</div></div>`).join("")}
     <div class="row" style="justify-content:center;margin:6px 0 4px"><button class="btn ghost small danger" id="resetBtn">Delete all data on this device</button></div>
     <p class="small muted" style="text-align:center">Lift Log · free and open source</p>`;
   wireDogtag($("#view"));
   $("#editShow").onclick = editShowcase;
-  const sheets = { edit: sheetEdit, look: sheetAppearance, bw: sheetBodyweight, badges: sheetBadges, routines: sheetRoutines, library: sheetLibrary, data: sheetData, import: sheetImport, install: sheetInstall };
+  const sheets = { edit: sheetEdit, look: sheetAppearance, bw: sheetBodyweight, badges: sheetBadges, routines: sheetRoutines, library: sheetLibrary, remind: sheetReminders, data: sheetData, import: sheetImport, install: sheetInstall };
   $$("[data-sheet]").forEach((b) => (b.onclick = () => sheets[b.dataset.sheet]()));
   $("#resetBtn").onclick = () => {
     if (!confirm("Delete ALL workouts, rest days, routines and friends on this device? Download a backup first if unsure.")) return;
@@ -1166,13 +1313,14 @@ function sheetEdit() {
       <label class="full">Name<input type="text" id="pName" value="${esc(p.name)}" placeholder="Your name"></label>
       <label>Height (cm)<input type="number" id="pHeight" value="${esc(p.height)}"></label>
       <label>Goal<select id="pGoal">${["Build muscle", "Get stronger", "Lose fat", "Stay fit"].map((g) => `<option ${g === p.goal ? "selected" : ""}>${g}</option>`).join("")}</select></label>
+      <label>Strength standards<select id="pSex"><option value="m" ${p.sex !== "f" ? "selected" : ""}>Men's</option><option value="f" ${p.sex === "f" ? "selected" : ""}>Women's</option></select></label>
       <label>Workouts per week<input type="number" id="pTarget" value="${esc(p.weeklyTarget)}" min="1" max="7"></label>
       <label>Rest, big lifts (sec)<input type="number" id="pRestC" value="${esc(p.restCompound)}" step="15"></label>
       <label>Rest, small lifts (sec)<input type="number" id="pRestI" value="${esc(p.restIsolation)}" step="15"></label>
       <label class="full">Spotify playlist link<input type="text" id="pPlaylist" value="${esc(p.playlist)}" placeholder="https://open.spotify.com/playlist/…"></label>
     </div>
     <button class="btn primary block" id="saveProfile" style="margin-top:14px">Save</button>`, (sh) => {
-    const keepForm = () => Object.assign(p, { name: $("#pName", sh).value.trim(), height: $("#pHeight", sh).value, goal: $("#pGoal", sh).value,
+    const keepForm = () => Object.assign(p, { name: $("#pName", sh).value.trim(), height: $("#pHeight", sh).value, goal: $("#pGoal", sh).value, sex: $("#pSex", sh).value,
       weeklyTarget: +$("#pTarget", sh).value || 5, restCompound: +$("#pRestC", sh).value || 120, restIsolation: +$("#pRestI", sh).value || 75, playlist: $("#pPlaylist", sh).value.trim() });
     $$(".av-pick", sh).forEach((bt) => (bt.onclick = () => { keepForm(); p.avatarPreset = bt.dataset.av; p.avatarImg = ""; save(); sheetEdit(); }));
     const clr = $("#avatarClear", sh); if (clr) clr.onclick = () => { keepForm(); p.avatarPreset = ""; p.avatarImg = ""; save(); sheetEdit(); };
@@ -1382,11 +1530,11 @@ function editRoutine(i, resume) {
     <label class="lbl">Name<input type="text" class="r-title" value="${esc(r.name)}"></label>
     <div class="lbl">Day</div><div class="r-days"></div>
     <div class="lbl">Exercises</div><div class="r-ex"></div>
-    <div class="row" style="margin-top:8px"><input type="text" class="r-add" list="exList2" placeholder="Search or type an exercise…"><button class="btn" id="rAddBtn">Add</button></div>
-    <datalist id="exList2">${allExerciseNames().map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
+    <div class="row" style="margin-top:8px"><div class="suggest-wrap" style="flex:1"><input type="text" class="r-add" placeholder="Search or type an exercise…" autocomplete="off"></div><button class="btn" id="rAddBtn">Add</button></div>
     <div class="row" style="margin-top:14px"><button class="btn primary" id="rSave" style="flex:1">Save routine</button>${i >= 0 ? `<button class="btn danger" id="rDel">Delete</button>` : ""}</div>`, (sh) => {
     draw(sh);
-    const add = () => { const v = $(".r-add", sh).value.trim(); if (!v) return; r.exercises.push(v); $(".r-add", sh).value = ""; draw(sh);
+    attachSuggest($(".r-add", sh), (n) => { $(".r-add", sh).value = n; add(); });
+    const add = () => { const v = canonicalName($(".r-add", sh).value.trim()); if (!v) return; r.exercises.push(v); $(".r-add", sh).value = ""; draw(sh);
       if (!knownExercise(v)) { const snapshot = JSON.parse(JSON.stringify(r)); tagExercise(v, () => editRoutine(i, snapshot)); } };
     $("#rAddBtn", sh).onclick = add;
     $(".r-add", sh).addEventListener("keydown", (e) => { if (e.key === "Enter") add(); });
@@ -1638,6 +1786,92 @@ function statusChip(s) {
     el.title = S.lastBackup ? `Last backup ${timeAgo(S.lastBackup)}` : "Not backed up yet";
   }
   el.innerHTML = `${icon}<span>${label}</span>`; el.className = "status-chip " + cls;
+}
+
+// ---------- REMINDERS ----------
+// Three layers, from most to least reliable:
+//  1. Calendar file (.ics) with repeating events + alarms: your phone's calendar app does the reminding.
+//  2. In-app: a banner on Home when your streak is at risk, plus notifications while the app is open.
+//  3. Background notifications (Android, installed app only): the browser wakes the app now and then to check.
+function remindersCfg() { return Object.assign({ on: false, workout: "18:00", streak: "20:00" }, S.reminders || {}); }
+function sheetReminders() {
+  const R = remindersCfg(), perm = "Notification" in window ? Notification.permission : "unsupported";
+  openModal(`<h2>Reminders</h2>
+    <div class="form">
+      <label>Workout reminder<input type="time" id="rmW" value="${R.workout}"></label>
+      <label>Streak check<input type="time" id="rmS" value="${R.streak}"></label>
+    </div>
+    <p class="small muted">The <b>workout reminder</b> tells you which routine is on today. The <b>streak check</b> only fires if you haven't logged a workout or a rest day yet.</p>
+    <h3>📅 Add to your calendar (most reliable)</h3>
+    <p class="small ink2">Downloads a calendar file with repeating events and alarms for your routine days and the daily streak check. Open it, and your phone's calendar handles the reminders, even when Lift Log is closed.</p>
+    <button class="btn" id="icsBtn">⬇ Download calendar reminders</button>
+    <h3>🔔 Notifications on this phone</h3>
+    <p class="small ink2">${perm === "unsupported" ? "This browser doesn't support notifications." : "Shows notifications while the app is open. If the app is installed on Android, the browser may also check in the background a few times a day, but phones decide when that happens, so treat it as a bonus."}</p>
+    <label class="switch-row"><span>Notifications</span><input type="checkbox" id="rmOn" ${R.on && perm === "granted" ? "checked" : ""} ${perm === "unsupported" || perm === "denied" ? "disabled" : ""}></label>
+    ${perm === "denied" ? `<p class="small warn-txt">Notifications are blocked for this site. Allow them in your browser's site settings.</p>` : ""}
+    <button class="btn primary block" id="rmSave" style="margin-top:14px">Save</button>`, (sh) => {
+    const read = () => ({ ...R, workout: $("#rmW", sh).value || "18:00", streak: $("#rmS", sh).value || "20:00" });
+    $("#icsBtn", sh).onclick = () => downloadICS(read());
+    $("#rmSave", sh).onclick = async () => {
+      const cfg = read(), want = $("#rmOn", sh).checked;
+      if (want && "Notification" in window && Notification.permission !== "granted") {
+        const res = await Notification.requestPermission(); if (res !== "granted") { toast("Notifications not allowed"); cfg.on = false; } else cfg.on = true;
+      } else cfg.on = want;
+      S.reminders = cfg; save(); await setupBackgroundReminders(); closeModal(); render(); toast("Reminders saved");
+    };
+  });
+}
+function downloadICS(cfg) {
+  const pad2 = (n) => String(n).padStart(2, "0"), BY = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+  const now = new Date(), stamp = now.toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+  const at = (dayIdx, hm) => { const d = new Date(); d.setHours(0, 0, 0, 0); if (dayIdx != null) d.setDate(d.getDate() + ((dayIdx - d.getDay() + 7) % 7));
+    const [h, m] = hm.split(":").map(Number); return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}T${pad2(h)}${pad2(m)}00`; };
+  const ev = (uid, start, rrule, title, desc, mins) => ["BEGIN:VEVENT", `UID:${uid}@liftlog`, `DTSTAMP:${stamp}`, `DTSTART:${start}`, `DURATION:PT${mins}M`, `RRULE:${rrule}`,
+    `SUMMARY:${title}`, `DESCRIPTION:${desc}`, "BEGIN:VALARM", "ACTION:DISPLAY", `DESCRIPTION:${title}`, "TRIGGER:PT0M", "END:VALARM", "END:VEVENT"].join("\r\n");
+  const out = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Lift Log//EN", "CALSCALE:GREGORIAN", "X-WR-CALNAME:Lift Log"];
+  S.routines.filter((r) => r.day >= 0).forEach((r, i) => out.push(ev(`routine-${i}-${r.day}`, at(r.day, cfg.workout), `FREQ=WEEKLY;BYDAY=${BY[r.day]}`,
+    `🏋️ ${r.name} today`, `${r.exercises.slice(0, 6).join(", ")}`, 60)));
+  out.push(ev("streak-check", at(null, cfg.streak), "FREQ=DAILY", "🔥 Log today in Lift Log", "Log a workout or a rest day to keep your streak.", 5));
+  out.push("END:VCALENDAR");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([out.join("\r\n")], { type: "text/calendar" })); a.download = "lift-log-reminders.ics"; a.click();
+  toast("Open the downloaded file to add it to your calendar");
+}
+function reminderPayload() {
+  const R = remindersCfg(), st = streaks();
+  const byDay = {}; S.routines.forEach((r) => { if (r.day >= 0) byDay[r.day] = r.name; });
+  return { on: R.on, workout: R.workout, streak: R.streak, byDay, streakNow: st.cur, logged: [...activeDays()].sort().at(-1) || "" };
+}
+async function setupBackgroundReminders() {
+  if (!("serviceWorker" in navigator) || location.protocol === "file:") return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    if (reg.active) reg.active.postMessage({ type: "reminders", payload: reminderPayload() });
+    if (remindersCfg().on && "periodicSync" in reg) {
+      const p = await navigator.permissions.query({ name: "periodic-background-sync" }).catch(() => ({ state: "denied" }));
+      if (p.state === "granted") await reg.periodicSync.register("liftlog-reminder", { minInterval: 60 * 60 * 1000 });
+    }
+  } catch (e) {}
+}
+// while the app is open: check once a minute
+const notifiedToday = {};
+setInterval(async () => {
+  const R = remindersCfg(); if (!R.on || !("Notification" in window) || Notification.permission !== "granted") return;
+  const now = new Date(), hm = `${pad(now.getHours())}:${pad(now.getMinutes())}`, d = today(), st = streaks();
+  const notify = async (key, title, body) => {
+    if (notifiedToday[key] === d) return; notifiedToday[key] = d;
+    try { const reg = await navigator.serviceWorker?.ready; reg ? reg.showNotification(title, { body, icon: "icon.svg", tag: key }) : new Notification(title, { body }); } catch (e) {}
+  };
+  const r = S.routines.find((x) => x.day === now.getDay());
+  if (r && hm >= R.workout && !st.loggedToday) notify("workout", `🏋️ ${r.name} today`, r.exercises.slice(0, 4).join(", ") + "…");
+  if (hm >= R.streak && !st.loggedToday) notify("streak", `🔥 Keep your ${st.cur}-day streak`, "Log a workout or a rest day before midnight.");
+}, 60000);
+function streakBanner() {
+  const st = streaks(), R = remindersCfg(), now = new Date();
+  if (st.loggedToday || S.draft || now.getHours() < 12) return "";
+  const late = `${pad(now.getHours())}:${pad(now.getMinutes())}` >= R.streak;
+  const hrs = 24 - now.getHours();
+  return `<div class="banner ${late ? "hot" : ""}"><span class="bi">🔥</span><div><b>${st.cur ? `Keep your ${st.cur}-day streak alive` : "Start a streak today"}</b>
+    <div class="small">Nothing logged today yet. About ${hrs} hour${hrs === 1 ? "" : "s"} left. A workout or a rest day both count.</div></div></div>`;
 }
 
 // ---------- ONBOARDING ----------

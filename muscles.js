@@ -210,3 +210,33 @@ const GROUPS = {
   Legs: ["quads", "hamstrings", "glutes", "calves"],
   Core: ["abs", "obliques"],
 };
+
+// ---- Strength standards ----
+// Thresholds (estimated 1RM ÷ bodyweight) where Novice, Intermediate, Advanced and Elite begin.
+// Approximate consensus of public bodyweight-ratio tables (sources disagree a little); use as a rough guide, not a ranking.
+// "reps" standards are max reps in one set (bodyweight moves). Dumbbell numbers are per dumbbell.
+const STANDARDS = {
+  "Barbell Squat":        { m: [1.0, 1.5, 2.0, 2.5],   f: [0.75, 1.25, 1.5, 2.0] },
+  "Front Squat":          { m: [0.8, 1.2, 1.6, 2.0],   f: [0.6, 1.0, 1.25, 1.6] },
+  "Barbell Bench Press":  { m: [0.75, 1.0, 1.5, 2.0],  f: [0.5, 0.75, 1.0, 1.25] },
+  "Incline Barbell Bench Press": { m: [0.6, 0.85, 1.2, 1.6], f: [0.4, 0.6, 0.85, 1.1] },
+  "Deadlift":             { m: [1.25, 2.0, 2.5, 3.0],  f: [1.0, 1.5, 2.0, 2.5] },
+  "Barbell Deadlift":     { m: [1.25, 2.0, 2.5, 3.0],  f: [1.0, 1.5, 2.0, 2.5] },
+  "Romanian Deadlift":    { m: [1.0, 1.5, 2.0, 2.5],   f: [0.75, 1.1, 1.5, 1.9] },
+  "Overhead Press":       { m: [0.5, 0.65, 0.9, 1.15], f: [0.35, 0.5, 0.65, 0.8] },
+  "Barbell Row":          { m: [0.6, 0.9, 1.2, 1.5],   f: [0.4, 0.6, 0.8, 1.0] },
+  "Inclined Leg Press Machine": { m: [1.5, 2.5, 3.5, 4.5], f: [1.0, 1.75, 2.5, 3.5] },
+  "Leg Press":            { m: [1.5, 2.5, 3.5, 4.5],   f: [1.0, 1.75, 2.5, 3.5] },
+  "Dumbbell Chest Press": { m: [0.25, 0.4, 0.55, 0.75], f: [0.15, 0.25, 0.35, 0.5] },
+  "Incline Dumbbell Press": { m: [0.22, 0.35, 0.5, 0.68], f: [0.13, 0.22, 0.32, 0.45] },
+  "Dumbbell Shoulder Press": { m: [0.18, 0.3, 0.42, 0.55], f: [0.1, 0.18, 0.27, 0.36] },
+  "Dumbbell Bicep Curl":  { m: [0.15, 0.25, 0.35, 0.45], f: [0.08, 0.14, 0.2, 0.28] },
+  "Dumbbell Hammer Curl": { m: [0.15, 0.25, 0.35, 0.45], f: [0.08, 0.14, 0.2, 0.28] },
+  "Dumbbell Lateral Raise": { m: [0.08, 0.13, 0.2, 0.27], f: [0.05, 0.08, 0.12, 0.17] },
+  "Cable Lat Pulldown":   { m: [0.6, 0.85, 1.1, 1.4],  f: [0.4, 0.55, 0.75, 0.95] },
+  "Pull Ups":             { reps: { m: [3, 8, 15, 22], f: [1, 3, 8, 15] } },
+  "Chin Ups":             { reps: { m: [3, 9, 16, 24], f: [1, 4, 9, 16] } },
+  "Push Ups":             { reps: { m: [10, 25, 40, 60], f: [3, 12, 25, 40] } },
+  "Dips":                 { reps: { m: [5, 12, 22, 32], f: [1, 5, 12, 20] } },
+};
+const LEVELS = ["Beginner", "Novice", "Intermediate", "Advanced", "Elite"];

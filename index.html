@@ -13,7 +13,7 @@
 <body>
 <header class="topbar">
   <h1>Lift Log</h1>
-  <div id="streakBadge" class="streak-badge" title="Current streak"></div>
+  <div class="row"><button id="syncBadge" class="sync-badge" hidden></button><div id="streakBadge" class="streak-badge" title="Current streak"></div></div>
 </header>
 
 <main id="view"></main>
@@ -29,8 +29,12 @@
 <div id="tooltip" class="tooltip" hidden></div>
 <div id="toast" class="toast" hidden></div>
 
+<script src="config.js"></script>
+<script src="vendor/qrcode.js"></script>
+<script src="avatars.js"></script>
 <script src="muscles.js"></script>
 <script src="figure.js"></script>
+<script src="sync.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

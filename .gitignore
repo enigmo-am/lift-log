@@ -1,0 +1,4 @@
+# Personal data exports - never commit these
+*arrow-export*.json
+liftlog-backup-*.json
+.DS_Store

@@ -1,0 +1,10 @@
+{
+  "name": "Lift Log",
+  "short_name": "Lift Log",
+  "description": "Free, offline workout logger with streaks, progress charts and a muscle map.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0f1115",
+  "theme_color": "#0f1115",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
